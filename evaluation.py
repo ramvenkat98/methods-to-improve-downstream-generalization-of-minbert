@@ -52,7 +52,8 @@ def model_eval_multitask(sentiment_dataloader,
                          sts_dataloader,
                          model,
                          device,
-                         limit_batches = None):
+                         limit_batches = None,
+                         exclude_para = False):
     model.eval()  # Switch to eval model, will turn off randomness like dropout.
 
     with torch.no_grad():
@@ -101,7 +102,7 @@ def model_eval_multitask(sentiment_dataloader,
             para_y_pred.extend(y_hat)
             para_y_true.extend(b_labels)
             para_sent_ids.extend(b_sent_ids)
-            if limit_batches is not None and step > limit_batches:
+            if exclude_para or (limit_batches is not None and step > limit_batches):
                 break
 
         paraphrase_accuracy = np.mean(np.array(para_y_pred) == np.array(para_y_true))

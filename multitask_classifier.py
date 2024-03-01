@@ -315,7 +315,7 @@ def train_multitask(args):
     for epoch in range(args.epochs):
         model.train()
         sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device)
-        para_train_loss = single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device)
+        # para_train_loss = single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device)
         sst_train_loss = single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device)
         print(f"Epoch {epoch}: train loss :: {sst_train_loss :.3f}, {para_train_loss :.3f}, {sts_train_loss :.3f}")
         print(f"Epoch {epoch}: train data stats")
@@ -325,7 +325,8 @@ def train_multitask(args):
             sts_train_dataloader,
             model,
             device,
-            limit_batches = 100,
+            limit_batches = None,
+            exclude_para = True,
         )
         print(f"Epoch {epoch}: dev data stats")
         sst_dev_acc, _, _, para_dev_acc, _, _, sts_dev_acc, _, _ = model_eval_multitask(
@@ -334,7 +335,8 @@ def train_multitask(args):
             sts_dev_dataloader,
             model,
             device,
-            limit_batches = 100,
+            limit_batches = None,
+            exclude_para = True,
         )
         # train_acc, train_f1, *_ = model_eval_sst(sst_train_dataloader, model, device)
         # dev_acc, dev_f1, *_ = model_eval_sst(sst_dev_dataloader, model, device)
