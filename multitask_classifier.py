@@ -118,7 +118,7 @@ class MultitaskBERT(nn.Module):
         '''
         ### TODO
         embedding_1 = self.classifier['paraphrase'](self.forward(input_ids_1, attention_mask_1)['pooler_output'])
-        embedding_2 = self.classifier['paraphrase'](self.forward(input_ids_1, attention_mask_1)['pooler_output'])
+        embedding_2 = self.classifier['paraphrase'](self.forward(input_ids_2, attention_mask_2)['pooler_output'])
         return torch.sum(embedding_1 * embedding_2, dim = 1)
 
 
@@ -130,7 +130,7 @@ class MultitaskBERT(nn.Module):
         '''
         ### TODO
         embedding_1 = self.classifier['similarity'](self.forward(input_ids_1, attention_mask_1)['pooler_output'])
-        embedding_2 = self.classifier['similarity'](self.forward(input_ids_1, attention_mask_1)['pooler_output'])
+        embedding_2 = self.classifier['similarity'](self.forward(input_ids_2, attention_mask_2)['pooler_output'])
         return torch.sum(embedding_1 * embedding_2, dim = 1).sigmoid() * 5.0
 
 
@@ -312,11 +312,15 @@ def train_multitask(args):
     best_dev_acc = 0
 
     # Run for the specified number of epochs.
+    exclude_para = True
     for epoch in range(args.epochs):
         model.train()
-        sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device)
-        # para_train_loss = single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device)
-        sst_train_loss = single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device)
+        sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, debug = True)
+        if exclude_para:
+            para_train_loss = -1
+        else:
+            para_train_loss = single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device)
+        sst_train_loss = single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, debug = True)
         print(f"Epoch {epoch}: train loss :: {sst_train_loss :.3f}, {para_train_loss :.3f}, {sts_train_loss :.3f}")
         print(f"Epoch {epoch}: train data stats")
         sst_train_acc, _, _, para_train_acc, _, _, sts_train_acc, _, _ = model_eval_multitask(
@@ -325,8 +329,8 @@ def train_multitask(args):
             sts_train_dataloader,
             model,
             device,
-            limit_batches = None,
-            exclude_para = True,
+            limit_batches = 100,
+            exclude_para = exclude_para,
         )
         print(f"Epoch {epoch}: dev data stats")
         sst_dev_acc, _, _, para_dev_acc, _, _, sts_dev_acc, _, _ = model_eval_multitask(
@@ -336,11 +340,14 @@ def train_multitask(args):
             model,
             device,
             limit_batches = None,
-            exclude_para = True,
+            exclude_para = exclude_para,
         )
         # train_acc, train_f1, *_ = model_eval_sst(sst_train_dataloader, model, device)
         # dev_acc, dev_f1, *_ = model_eval_sst(sst_dev_dataloader, model, device)
-        dev_acc = (sst_dev_acc + para_dev_acc + sts_dev_acc) / 3
+        if exclude_para:
+            dev_acc = (sst_dev_acc + sts_dev_acc) / 2
+        else:
+            dev_acc = (sst_dev_acc + para_dev_acc + sts_dev_acc) / 3
         if dev_acc > best_dev_acc:
             best_dev_acc = dev_acc
             save_model(model, optimizer, args, config, args.filepath)
