@@ -323,7 +323,7 @@ def train_multitask(args):
     best_dev_acc = 0
 
     # Run for the specified number of epochs.
-    exclude_para = True
+    exclude_para = False
     debug = False
     for epoch in range(args.epochs):
         model.train()
