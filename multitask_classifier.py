@@ -73,21 +73,12 @@ class MultitaskBERT(nn.Module):
                 param.requires_grad = True
         # You will want to add layers here to perform the downstream tasks.
         ### TODO
-        self.classifier = nn.ModuleDict({
-            'sentiment': nn.Sequential(
-                nn.Dropout(config.hidden_dropout_prob),
-                nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES), 
-            ),
-            'paraphrase': nn.Sequential(
-                nn.Dropout(config.hidden_dropout_prob),
-                nn.Linear(config.hidden_size, config.paraphrase_embedding_size), 
-            ),
-            'similarity': nn.Sequential(
-                nn.Dropout(config.hidden_dropout_prob),
-                nn.Linear(config.hidden_size, config.similarity_embedding_size), 
-            ),
-        })
-
+        self.sentiment_linear = nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES)
+        self.sentiment_dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.paraphrase_linear = nn.Linear(config.hidden_size, config.paraphrase_embedding_size)
+        self.paraphrase_dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.similarity_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
+        self.similarity_dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, input_ids, attention_mask):
         'Takes a batch of sentences and produces embeddings for them.'
@@ -106,7 +97,11 @@ class MultitaskBERT(nn.Module):
         Thus, your output should contain 5 logits for each sentence.
         '''
         ### TODO
-        return self.classifier['sentiment'](self.forward(input_ids, attention_mask)['pooler_output'])
+        return self.sentiment_linear(
+            self.sentiment_dropout(
+                self.bert(input_ids, attention_mask)['pooler_output']
+            )
+        )
 
 
     def predict_paraphrase(self,
@@ -117,8 +112,16 @@ class MultitaskBERT(nn.Module):
         during evaluation.
         '''
         ### TODO
-        embedding_1 = self.classifier['paraphrase'](self.forward(input_ids_1, attention_mask_1)['pooler_output'])
-        embedding_2 = self.classifier['paraphrase'](self.forward(input_ids_2, attention_mask_2)['pooler_output'])
+        embedding_1 = self.paraphrase_linear(
+            self.paraphrase_dropout(
+                self.bert(input_ids_1, attention_mask_1)['pooler_output']
+            )
+        )
+        embedding_2 = self.paraphrase_linear(
+            self.paraphrase_dropout(
+                self.bert(input_ids_2, attention_mask_2)['pooler_output']
+            )
+        )
         return torch.sum(embedding_1 * embedding_2, dim = 1)
 
 
@@ -129,9 +132,17 @@ class MultitaskBERT(nn.Module):
         Note that your output should be unnormalized (a logit).
         '''
         ### TODO
-        embedding_1 = self.classifier['similarity'](self.forward(input_ids_1, attention_mask_1)['pooler_output'])
-        embedding_2 = self.classifier['similarity'](self.forward(input_ids_2, attention_mask_2)['pooler_output'])
-        return torch.sum(embedding_1 * embedding_2, dim = 1).sigmoid() * 5.0
+        embedding_1 = self.similarity_linear(
+            self.similarity_dropout(
+                self.bert(input_ids_1, attention_mask_1)['pooler_output']
+            )
+        )
+        embedding_2 = self.similarity_linear(
+            self.similarity_dropout(
+                self.bert(input_ids_2, attention_mask_2)['pooler_output']
+            )
+        )
+        return F.cosine_similarity(embedding_1, embedding_2) * 5.0
 
 
 
@@ -296,8 +307,8 @@ def train_multitask(args):
     # Init model.
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
               'num_labels': num_labels,
-              'similarity_embedding_size': 64,
-              'paraphrase_embedding_size': 64,
+              'similarity_embedding_size': 32,
+              'paraphrase_embedding_size': 32,
               'hidden_size': 768,
               'data_dir': '.',
               'option': args.option}
