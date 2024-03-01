@@ -50,7 +50,9 @@ def model_eval_sst(dataloader, model, device):
 def model_eval_multitask(sentiment_dataloader,
                          paraphrase_dataloader,
                          sts_dataloader,
-                         model, device):
+                         model,
+                         device,
+                         limit_batches = None):
     model.eval()  # Switch to eval model, will turn off randomness like dropout.
 
     with torch.no_grad():
@@ -71,6 +73,8 @@ def model_eval_multitask(sentiment_dataloader,
             sst_y_pred.extend(y_hat)
             sst_y_true.extend(b_labels)
             sst_sent_ids.extend(b_sent_ids)
+            if limit_batches is not None and step > limit_batches:
+                break
 
         sentiment_accuracy = np.mean(np.array(sst_y_pred) == np.array(sst_y_true))
 
@@ -97,6 +101,8 @@ def model_eval_multitask(sentiment_dataloader,
             para_y_pred.extend(y_hat)
             para_y_true.extend(b_labels)
             para_sent_ids.extend(b_sent_ids)
+            if limit_batches is not None and step > limit_batches:
+                break
 
         paraphrase_accuracy = np.mean(np.array(para_y_pred) == np.array(para_y_true))
 
@@ -123,6 +129,8 @@ def model_eval_multitask(sentiment_dataloader,
             sts_y_pred.extend(y_hat)
             sts_y_true.extend(b_labels)
             sts_sent_ids.extend(b_sent_ids)
+            if limit_batches is not None and step > limit_batches:
+                break
         pearson_mat = np.corrcoef(sts_y_pred,sts_y_true)
         sts_corr = pearson_mat[1][0]
 

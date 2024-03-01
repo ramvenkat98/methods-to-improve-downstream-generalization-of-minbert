@@ -150,7 +150,7 @@ def save_model(model, optimizer, args, config, filepath):
     torch.save(save_info, filepath)
     print(f"save the model to {filepath}")
 
-def single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device):
+def single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, debug=False):
     train_loss = 0
     num_batches = 0
     printed = 0
@@ -164,7 +164,7 @@ def single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device
 
         optimizer.zero_grad()
         logits = model.predict_sentiment(b_ids, b_mask)
-        if printed < 5:
+        if debug and printed < 5:
             print("sst", logits[:5, :], b_labels[:5])
             printed += 1
         loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
@@ -174,12 +174,12 @@ def single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device
 
         train_loss += loss.item()
         num_batches += 1
-        if num_batches >= 5:
+        if debug and num_batches >= 5:
             break
     train_loss = train_loss / (num_batches)
     return train_loss
 
-def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device):
+def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device, debug=False):
     train_loss = 0
     num_batches = 0
     printed = 0
@@ -200,7 +200,7 @@ def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, devi
 
         optimizer.zero_grad()
         logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
-        if printed < 5:
+        if debug and printed < 5:
             print("para", logits[:5], b_labels[:5])
             printed += 1
         loss = F.binary_cross_entropy_with_logits(logits, b_labels.view(-1).float(), reduction='sum') / args.batch_size
@@ -210,12 +210,12 @@ def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, devi
 
         train_loss += loss.item()
         num_batches += 1
-        if num_batches >= 5:
+        if debug and num_batches >= 5:
             break
     train_loss = train_loss / (num_batches)
     return train_loss
 
-def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device):
+def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, debug=False):
     train_loss = 0
     num_batches = 0
     printed = 0
@@ -236,7 +236,7 @@ def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device
 
         optimizer.zero_grad()
         predictions = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
-        if printed < 5:
+        if debug and printed < 5:
             print("sts", predictions[:5], b_labels[:5])
             printed += 1
         loss = F.mse_loss(predictions, b_labels.view(-1).float(), reduction='sum') / args.batch_size
@@ -246,7 +246,7 @@ def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device
 
         train_loss += loss.item()
         num_batches += 1
-        if num_batches >= 5:
+        if debug and num_batches >= 5:
             break
     train_loss = train_loss / (num_batches)
     return train_loss
@@ -325,6 +325,7 @@ def train_multitask(args):
             sts_train_dataloader,
             model,
             device,
+            limit_batches = 100,
         )
         print(f"Epoch {epoch}: dev data stats")
         sst_dev_acc, _, _, para_dev_acc, _, _, sts_dev_acc, _, _ = model_eval_multitask(
@@ -333,6 +334,7 @@ def train_multitask(args):
             sts_dev_dataloader,
             model,
             device,
+            limit_batches = 100,
         )
         # train_acc, train_f1, *_ = model_eval_sst(sst_train_dataloader, model, device)
         # dev_acc, dev_f1, *_ = model_eval_sst(sst_dev_dataloader, model, device)
