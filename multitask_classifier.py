@@ -313,14 +313,15 @@ def train_multitask(args):
 
     # Run for the specified number of epochs.
     exclude_para = True
+    debug = False
     for epoch in range(args.epochs):
         model.train()
-        sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, debug = True)
+        sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, debug = debug)
         if exclude_para:
             para_train_loss = -1
         else:
-            para_train_loss = single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device)
-        sst_train_loss = single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, debug = True)
+            para_train_loss = single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device, debug = debug)
+        sst_train_loss = single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, debug = debug)
         print(f"Epoch {epoch}: train loss :: {sst_train_loss :.3f}, {para_train_loss :.3f}, {sts_train_loss :.3f}")
         print(f"Epoch {epoch}: train data stats")
         sst_train_acc, _, _, para_train_acc, _, _, sts_train_acc, _, _ = model_eval_multitask(
