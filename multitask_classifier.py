@@ -45,6 +45,7 @@ def seed_everything(seed=11711):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+    torch.mps.manual_seed(seed)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
@@ -72,7 +73,20 @@ class MultitaskBERT(nn.Module):
                 param.requires_grad = True
         # You will want to add layers here to perform the downstream tasks.
         ### TODO
-        raise NotImplementedError
+        self.classifier = nn.ModuleDict({
+            'sentiment': nn.Sequential(
+                nn.Dropout(config.hidden_dropout_prob),
+                nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES), 
+            ),
+            'paraphrase': nn.Sequential(
+                nn.Dropout(config.hidden_dropout_prob),
+                nn.Linear(config.hidden_size, config.paraphrase_embedding_size), 
+            ),
+            'similarity': nn.Sequential(
+                nn.Dropout(config.hidden_dropout_prob),
+                nn.Linear(config.hidden_size, config.similarity_embedding_size), 
+            ),
+        })
 
 
     def forward(self, input_ids, attention_mask):
@@ -82,7 +96,7 @@ class MultitaskBERT(nn.Module):
         # When thinking of improvements, you can later try modifying this
         # (e.g., by adding other layers).
         ### TODO
-        raise NotImplementedError
+        return self.bert(input_ids, attention_mask)
 
 
     def predict_sentiment(self, input_ids, attention_mask):
@@ -92,7 +106,7 @@ class MultitaskBERT(nn.Module):
         Thus, your output should contain 5 logits for each sentence.
         '''
         ### TODO
-        raise NotImplementedError
+        return self.classifier['sentiment'](self.forward(input_ids, attention_mask)['pooler_output'])
 
 
     def predict_paraphrase(self,
@@ -103,7 +117,9 @@ class MultitaskBERT(nn.Module):
         during evaluation.
         '''
         ### TODO
-        raise NotImplementedError
+        embedding_1 = self.classifier['paraphrase'](self.forward(input_ids_1, attention_mask_1)['pooler_output'])
+        embedding_2 = self.classifier['paraphrase'](self.forward(input_ids_1, attention_mask_1)['pooler_output'])
+        return torch.sum(embedding_1 * embedding_2, dim = 1)
 
 
     def predict_similarity(self,
@@ -113,7 +129,9 @@ class MultitaskBERT(nn.Module):
         Note that your output should be unnormalized (a logit).
         '''
         ### TODO
-        raise NotImplementedError
+        embedding_1 = self.classifier['similarity'](self.forward(input_ids_1, attention_mask_1)['pooler_output'])
+        embedding_2 = self.classifier['similarity'](self.forward(input_ids_1, attention_mask_1)['pooler_output'])
+        return torch.sum(embedding_1 * embedding_2, dim = 1).sigmoid() * 5.0
 
 
 
@@ -132,6 +150,106 @@ def save_model(model, optimizer, args, config, filepath):
     torch.save(save_info, filepath)
     print(f"save the model to {filepath}")
 
+def single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device):
+    train_loss = 0
+    num_batches = 0
+    printed = 0
+    for batch in tqdm(sst_train_dataloader, desc=f'train-sst-{epoch}', disable=TQDM_DISABLE):
+        b_ids, b_mask, b_labels = (batch['token_ids'],
+                                    batch['attention_mask'], batch['labels'])
+
+        b_ids = b_ids.to(device)
+        b_mask = b_mask.to(device)
+        b_labels = b_labels.to(device)
+
+        optimizer.zero_grad()
+        logits = model.predict_sentiment(b_ids, b_mask)
+        if printed < 5:
+            print("sst", logits[:5, :], b_labels[:5])
+            printed += 1
+        loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+
+        loss.backward()
+        optimizer.step()
+
+        train_loss += loss.item()
+        num_batches += 1
+        if num_batches >= 5:
+            break
+    train_loss = train_loss / (num_batches)
+    return train_loss
+
+def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device):
+    train_loss = 0
+    num_batches = 0
+    printed = 0
+    for batch in tqdm(para_train_dataloader, desc=f'train-para-{epoch}', disable=TQDM_DISABLE):
+        b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels = (
+            batch['token_ids_1'],
+            batch['attention_mask_1'],
+            batch['token_ids_2'],
+            batch['attention_mask_2'],
+            batch['labels'],
+        )
+
+        b_ids_1 = b_ids_1.to(device)
+        b_mask_1 = b_mask_1.to(device)
+        b_ids_2 = b_ids_2.to(device)
+        b_mask_2 = b_mask_2.to(device)
+        b_labels = b_labels.to(device)
+
+        optimizer.zero_grad()
+        logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
+        if printed < 5:
+            print("para", logits[:5], b_labels[:5])
+            printed += 1
+        loss = F.binary_cross_entropy_with_logits(logits, b_labels.view(-1).float(), reduction='sum') / args.batch_size
+
+        loss.backward()
+        optimizer.step()
+
+        train_loss += loss.item()
+        num_batches += 1
+        if num_batches >= 5:
+            break
+    train_loss = train_loss / (num_batches)
+    return train_loss
+
+def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device):
+    train_loss = 0
+    num_batches = 0
+    printed = 0
+    for batch in tqdm(sts_train_dataloader, desc=f'train-sts-{epoch}', disable=TQDM_DISABLE):
+        b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels = (
+            batch['token_ids_1'],
+            batch['attention_mask_1'],
+            batch['token_ids_2'],
+            batch['attention_mask_2'],
+            batch['labels'],
+        )
+
+        b_ids_1 = b_ids_1.to(device)
+        b_mask_1 = b_mask_1.to(device)
+        b_ids_2 = b_ids_2.to(device)
+        b_mask_2 = b_mask_2.to(device)
+        b_labels = b_labels.to(device)
+
+        optimizer.zero_grad()
+        predictions = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
+        if printed < 5:
+            print("sts", predictions[:5], b_labels[:5])
+            printed += 1
+        loss = F.mse_loss(predictions, b_labels.view(-1).float(), reduction='sum') / args.batch_size
+
+        loss.backward()
+        optimizer.step()
+
+        train_loss += loss.item()
+        num_batches += 1
+        if num_batches >= 5:
+            break
+    train_loss = train_loss / (num_batches)
+    return train_loss
 
 def train_multitask(args):
     '''Train MultitaskBERT.
@@ -141,7 +259,12 @@ def train_multitask(args):
     look at test_multitask below to see how you can use the custom torch `Dataset`s
     in datasets.py to load in examples from the Quora and SemEval datasets.
     '''
-    device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+    # device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+    device = torch.device('cpu')
+    if args.use_gpu and torch.cuda.is_available():
+        device = torch.device('cuda')
+    elif args.use_gpu and torch.backends.mps.is_available():
+        device = torch.device('mps')
     # Create the data and its corresponding datasets and dataloader.
     sst_train_data, num_labels,para_train_data, sts_train_data = load_multitask_data(args.sst_train,args.para_train,args.sts_train, split ='train')
     sst_dev_data, num_labels,para_dev_data, sts_dev_data = load_multitask_data(args.sst_dev,args.para_dev,args.sts_dev, split ='train')
@@ -153,10 +276,28 @@ def train_multitask(args):
                                       collate_fn=sst_train_data.collate_fn)
     sst_dev_dataloader = DataLoader(sst_dev_data, shuffle=False, batch_size=args.batch_size,
                                     collate_fn=sst_dev_data.collate_fn)
+    
+    para_train_data = SentencePairDataset(para_train_data, args)
+    para_dev_data = SentencePairDataset(para_dev_data, args)
+
+    para_train_dataloader = DataLoader(para_train_data, shuffle=True, batch_size=args.batch_size,
+                                      collate_fn=para_train_data.collate_fn)
+    para_dev_dataloader = DataLoader(para_dev_data, shuffle=False, batch_size=args.batch_size,
+                                    collate_fn=para_dev_data.collate_fn)
+
+    sts_train_data = SentencePairDataset(sts_train_data, args)
+    sts_dev_data = SentencePairDataset(sts_dev_data, args)
+
+    sts_train_dataloader = DataLoader(sts_train_data, shuffle=True, batch_size=args.batch_size,
+                                      collate_fn=para_train_data.collate_fn)
+    sts_dev_dataloader = DataLoader(sts_dev_data, shuffle=False, batch_size=args.batch_size,
+                                    collate_fn=para_dev_data.collate_fn)
 
     # Init model.
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
               'num_labels': num_labels,
+              'similarity_embedding_size': 64,
+              'paraphrase_embedding_size': 64,
               'hidden_size': 768,
               'data_dir': '.',
               'option': args.option}
@@ -173,42 +314,46 @@ def train_multitask(args):
     # Run for the specified number of epochs.
     for epoch in range(args.epochs):
         model.train()
-        train_loss = 0
-        num_batches = 0
-        for batch in tqdm(sst_train_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
-            b_ids, b_mask, b_labels = (batch['token_ids'],
-                                       batch['attention_mask'], batch['labels'])
-
-            b_ids = b_ids.to(device)
-            b_mask = b_mask.to(device)
-            b_labels = b_labels.to(device)
-
-            optimizer.zero_grad()
-            logits = model.predict_sentiment(b_ids, b_mask)
-            loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
-
-            loss.backward()
-            optimizer.step()
-
-            train_loss += loss.item()
-            num_batches += 1
-
-        train_loss = train_loss / (num_batches)
-
-        train_acc, train_f1, *_ = model_eval_sst(sst_train_dataloader, model, device)
-        dev_acc, dev_f1, *_ = model_eval_sst(sst_dev_dataloader, model, device)
-
+        sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device)
+        para_train_loss = single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device)
+        sst_train_loss = single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device)
+        print(f"Epoch {epoch}: train loss :: {sst_train_loss :.3f}, {para_train_loss :.3f}, {sts_train_loss :.3f}")
+        print(f"Epoch {epoch}: train data stats")
+        sst_train_acc, _, _, para_train_acc, _, _, sts_train_acc, _, _ = model_eval_multitask(
+            sst_train_dataloader,
+            para_train_dataloader,
+            sts_train_dataloader,
+            model,
+            device,
+        )
+        print(f"Epoch {epoch}: dev data stats")
+        sst_dev_acc, _, _, para_dev_acc, _, _, sts_dev_acc, _, _ = model_eval_multitask(
+            sst_dev_dataloader,
+            para_dev_dataloader,
+            sts_dev_dataloader,
+            model,
+            device,
+        )
+        # train_acc, train_f1, *_ = model_eval_sst(sst_train_dataloader, model, device)
+        # dev_acc, dev_f1, *_ = model_eval_sst(sst_dev_dataloader, model, device)
+        dev_acc = (sst_dev_acc + para_dev_acc + sts_dev_acc) / 3
         if dev_acc > best_dev_acc:
             best_dev_acc = dev_acc
             save_model(model, optimizer, args, config, args.filepath)
-
-        print(f"Epoch {epoch}: train loss :: {train_loss :.3f}, train acc :: {train_acc :.3f}, dev acc :: {dev_acc :.3f}")
+        else:
+            print(f"Dev acc {dev_acc} is not better than best dev acc {best_dev_acc}")
+        # print(f"Epoch {epoch}: train loss :: {train_loss :.3f}, train acc :: {train_acc :.3f}, dev acc :: {dev_acc :.3f}")
 
 
 def test_multitask(args):
     '''Test and save predictions on the dev and test sets of all three tasks.'''
     with torch.no_grad():
-        device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+        # device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+        device = torch.device('cpu')
+        if args.use_gpu and torch.cuda.is_available():
+            device = torch.device('cuda')
+        elif args.use_gpu and torch.backends.mps.is_available():
+            device = torch.device('mps')
         saved = torch.load(args.filepath)
         config = saved['model_config']
 

@@ -61,7 +61,8 @@ class BertSentimentClassifier(torch.nn.Module):
         ### TODO
         return self.final_linear(
             self.final_dropout(
-                self.bert(input_ids, attention_mask)['pooler_output'])
+                self.bert(input_ids, attention_mask)['pooler_output']
+            )
         )
 
 
