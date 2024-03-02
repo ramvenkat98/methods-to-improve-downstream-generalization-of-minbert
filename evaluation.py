@@ -137,11 +137,11 @@ def model_eval_multitask(sentiment_dataloader,
         pearson_mat = np.corrcoef(sts_y_pred,sts_y_true)
         sts_corr = pearson_mat[1][0]
 
-        if exclude_sts:
+        if exclude_sst:
             sentiment_accuracy = 0.0
         if exclude_para:
             paraphrase_accuracy = 0.0
-        if exclude_sst:
+        if exclude_sts:
             sts_corr = -1.0
         print(f'Sentiment classification accuracy: {sentiment_accuracy:.3f}')
         print(f'Paraphrase detection accuracy: {paraphrase_accuracy:.3f}')

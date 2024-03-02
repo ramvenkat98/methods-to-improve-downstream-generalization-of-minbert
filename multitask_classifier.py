@@ -91,11 +91,12 @@ class MultitaskBERT(nn.Module):
         # (e.g., by adding other layers).
         ### TODO
         if self.config.option == 'pretrain' and sent_ids is not None:
-            for sent_id in sent_ids:
+            for (i, sent_id) in enumerate(sent_ids):
                 cache_key = (sent_id, identifier)
                 if cache_key not in self.bert_embeddings_cache:
-                    self.bert_embeddings_cache[cache_key] = self.bert(input_ids[sent_id], attention_mask[sent_id])['pooler_output']
-            return torch.stack([self.bert_embeddings_cache[(sent_id, identifier)] for sent_id in sent_ids])
+                    self.bert_embeddings_cache[cache_key] = self.bert(input_ids[i:i+1], attention_mask[i:i+1])['pooler_output']
+            result = torch.stack([self.bert_embeddings_cache[(sent_id, identifier)] for sent_id in sent_ids]).squeeze(dim = 1)
+            return result
         else:
             return self.bert(input_ids, attention_mask)['pooler_output']
 
@@ -353,7 +354,7 @@ def train_multitask(args):
     exclude_sts = False
     exclude_para = False
     exclude_sst = False
-    debug = True
+    debug = False
     for epoch in range(args.epochs):
         model.train()
         if exclude_sts:
@@ -369,6 +370,7 @@ def train_multitask(args):
         else:
             sst_train_loss = single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, debug = debug)
         print(f"Epoch {epoch}: train loss :: {sst_train_loss :.3f}, {para_train_loss :.3f}, {sts_train_loss :.3f}")
+        '''
         print(f"Epoch {epoch}: train data stats")
         sst_train_acc, _, _, para_train_acc, _, _, sts_train_acc, _, _ = model_eval_multitask(
             sst_train_dataloader,
@@ -381,6 +383,7 @@ def train_multitask(args):
             exclude_para = exclude_para,
             exclude_sst = exclude_sst,
         )
+        '''
         print(f"Epoch {epoch}: dev data stats")
         sst_dev_acc, _, _, para_dev_acc, _, _, sts_dev_acc, _, _ = model_eval_multitask(
             sst_dev_dataloader,
@@ -393,6 +396,7 @@ def train_multitask(args):
             exclude_para = exclude_para,
             exclude_sst = exclude_sst,
         )
+        sts_dev_acc = (1.0 + sts_dev_acc) / 2.0 # normalize Pearson correlation to be in [0, 1] range
         # train_acc, train_f1, *_ = model_eval_sst(sst_train_dataloader, model, device)
         # dev_acc, dev_f1, *_ = model_eval_sst(sst_dev_dataloader, model, device)
         if exclude_para:
@@ -400,6 +404,7 @@ def train_multitask(args):
         else:
             dev_acc = (sst_dev_acc + para_dev_acc + sts_dev_acc) / 3
         if dev_acc > best_dev_acc:
+            print(f"Dev acc {dev_acc} is better than best dev acc {best_dev_acc}")
             best_dev_acc = dev_acc
             save_model(model, optimizer, args, config, args.filepath)
         else:
