@@ -90,7 +90,14 @@ class MultitaskBERT(nn.Module):
         # When thinking of improvements, you can later try modifying this
         # (e.g., by adding other layers).
         ### TODO
-        return self.bert(input_ids, attention_mask)
+        if self.config.option == 'pretrain' and sent_ids is not None:
+            for sent_id in sent_ids:
+                cache_key = (sent_id, identifier)
+                if cache_key not in self.bert_embeddings_cache:
+                    self.bert_embeddings_cache[cache_key] = self.bert(input_ids[sent_id], attention_mask[sent_id])['pooler_output']
+            return torch.stack([self.bert_embeddings_cache[(sent_id, identifier)] for sent_id in sent_ids])
+        else:
+            return self.bert(input_ids, attention_mask)['pooler_output']
 
 
     def predict_sentiment(self, input_ids, attention_mask, sent_ids):
@@ -102,7 +109,7 @@ class MultitaskBERT(nn.Module):
         ### TODO
         return self.sentiment_linear(
             self.sentiment_dropout(
-                self.bert(input_ids, attention_mask, sent_ids, 'sentiment')['pooler_output']
+                self.bert(input_ids, attention_mask, sent_ids, 'sentiment')
             )
         )
 
@@ -116,8 +123,8 @@ class MultitaskBERT(nn.Module):
         during evaluation.
         '''
         ### TODO
-        bert_embedding_1 = self.bert(input_ids_1, attention_mask_1, sent_ids, 'para_1')['pooler_output']
-        bert_embedding_2 = self.bert(input_ids_2, attention_mask_2, sent_ids, 'para_2')['pooler_output']
+        bert_embedding_1 = self.bert(input_ids_1, attention_mask_1, sent_ids, 'para_1')
+        bert_embedding_2 = self.bert(input_ids_2, attention_mask_2, sent_ids, 'para_2')
         embedding_1 = self.paraphrase_linear_for_dot(
             self.paraphrase_dropout(
                 bert_embedding_1
@@ -142,12 +149,12 @@ class MultitaskBERT(nn.Module):
         ### TODO
         embedding_1 = self.similarity_linear(
             self.similarity_dropout(
-                self.bert(input_ids_1, attention_mask_1, sent_ids, 'similarity')['pooler_output']
+                self.bert(input_ids_1, attention_mask_1, sent_ids, 'similarity')
             )
         )
         embedding_2 = self.similarity_linear(
             self.similarity_dropout(
-                self.bert(input_ids_2, attention_mask_2, sent_ids, 'similarity')['pooler_output']
+                self.bert(input_ids_2, attention_mask_2, sent_ids, 'similarity')
             )
         )
         return F.cosine_similarity(embedding_1, embedding_2) * 5.0
