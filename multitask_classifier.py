@@ -93,7 +93,7 @@ class MultitaskBERT(nn.Module):
         return self.bert(input_ids, attention_mask)
 
 
-    def predict_sentiment(self, input_ids, attention_mask, sent_ids):
+    def predict_sentiment(self, input_ids, attention_mask, sent_ids=None):
         '''Given a batch of sentences, outputs logits for classifying sentiment.
         There are 5 sentiment classes:
         (0 - negative, 1- somewhat negative, 2- neutral, 3- somewhat positive, 4- positive)
@@ -102,7 +102,7 @@ class MultitaskBERT(nn.Module):
         ### TODO
         return self.sentiment_linear(
             self.sentiment_dropout(
-                self.bert(input_ids, attention_mask, sent_ids, 'sentiment')['pooler_output']
+                self.forward(input_ids, attention_mask, sent_ids, 'sentiment')['pooler_output']
             )
         )
 
@@ -110,14 +110,14 @@ class MultitaskBERT(nn.Module):
     def predict_paraphrase(self,
                            input_ids_1, attention_mask_1,
                            input_ids_2, attention_mask_2,
-                           sent_ids):
+                           sent_ids=None):
         '''Given a batch of pairs of sentences, outputs a single logit for predicting whether they are paraphrases.
         Note that your output should be unnormalized (a logit); it will be passed to the sigmoid function
         during evaluation.
         '''
         ### TODO
-        bert_embedding_1 = self.bert(input_ids_1, attention_mask_1, sent_ids, 'para_1')['pooler_output']
-        bert_embedding_2 = self.bert(input_ids_2, attention_mask_2, sent_ids, 'para_2')['pooler_output']
+        bert_embedding_1 = self.forward(input_ids_1, attention_mask_1, sent_ids, 'para_1')['pooler_output']
+        bert_embedding_2 = self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2')['pooler_output']
         embedding_1 = self.paraphrase_linear_for_dot(
             self.paraphrase_dropout(
                 bert_embedding_1
@@ -129,25 +129,25 @@ class MultitaskBERT(nn.Module):
             )
         )
         intermediate = torch.concat((bert_embedding_1, bert_embedding_2, embedding_1 * embedding_2), dim=1)
-        return self.paraphrase_final_linear(intermediate)
+        return self.paraphrase_final_linear(intermediate).view(-1)
 
 
     def predict_similarity(self,
                            input_ids_1, attention_mask_1,
                            input_ids_2, attention_mask_2,
-                           sent_ids):
+                           sent_ids=None):
         '''Given a batch of pairs of sentences, outputs a single logit corresponding to how similar they are.
         Note that your output should be unnormalized (a logit).
         '''
         ### TODO
         embedding_1 = self.similarity_linear(
             self.similarity_dropout(
-                self.bert(input_ids_1, attention_mask_1, sent_ids, 'similarity')['pooler_output']
+                self.forward(input_ids_1, attention_mask_1, sent_ids, 'similarity')['pooler_output']
             )
         )
         embedding_2 = self.similarity_linear(
             self.similarity_dropout(
-                self.bert(input_ids_2, attention_mask_2, sent_ids, 'similarity')['pooler_output']
+                self.forward(input_ids_2, attention_mask_2, sent_ids, 'similarity')['pooler_output']
             )
         )
         return F.cosine_similarity(embedding_1, embedding_2) * 5.0
@@ -177,7 +177,7 @@ def single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device
         b_ids, b_mask, b_labels, b_sent_ids = (batch['token_ids'],
                                     batch['attention_mask'], batch['labels'], batch['sent_ids'])
         if debug and num_batches < 5:
-            print(b_sent_ids[:5], b_ids.shape, b_sent_ids.shape, b_labels.shape)
+            print(b_sent_ids[:5], b_ids[:5], b_sent_ids[:5], b_labels[:5])
         b_ids = b_ids.to(device)
         b_mask = b_mask.to(device)
         b_labels = b_labels.to(device)
@@ -213,7 +213,7 @@ def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, devi
             batch['sent_ids'],
         )
         if debug and num_batches < 5:
-            print(b_ids_1[:5], b_ids_1.shape, b_ids_2[:5], b_ids_2.shape, b_sent_ids.shape, b_labels.shape)
+            print(b_ids_1[:5], b_ids_2[:5], b_sent_ids[:5], b_labels[:5])
         b_ids_1 = b_ids_1.to(device)
         b_mask_1 = b_mask_1.to(device)
         b_ids_2 = b_ids_2.to(device)
@@ -251,7 +251,7 @@ def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device
             batch['sent_ids'],
         )
         if debug and num_batches < 5:
-            print(b_ids_1[:5], b_ids_1.shape, b_ids_2[:5], b_ids_2.shape, b_sent_ids.shape, b_labels.shape)
+            print(b_ids_1[:5], b_ids_2[:5], b_sent_ids[:5], b_labels[:5])
         b_ids_1 = b_ids_1.to(device)
         b_mask_1 = b_mask_1.to(device)
         b_ids_2 = b_ids_2.to(device)
@@ -346,7 +346,7 @@ def train_multitask(args):
     exclude_sts = False
     exclude_para = False
     exclude_sst = False
-    debug = False
+    debug = True
     for epoch in range(args.epochs):
         model.train()
         if exclude_sts:
