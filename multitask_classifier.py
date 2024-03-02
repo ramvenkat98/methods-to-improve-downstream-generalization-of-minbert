@@ -69,10 +69,11 @@ class MultitaskBERT(nn.Module):
         for param in self.bert.parameters():
             if config.option == 'pretrain':
                 param.requires_grad = False
-            elif config.option == 'finetune':
+            elif config.option == 'finetune' or config.option == 'lp_ft':
                 param.requires_grad = True
         # You will want to add layers here to perform the downstream tasks.
         ### TODO
+        self.config = config
         self.sentiment_linear = nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES)
         self.sentiment_dropout = nn.Dropout(config.hidden_dropout_prob)
         self.paraphrase_linear = nn.Linear(config.hidden_size, config.paraphrase_embedding_size)
@@ -316,8 +317,15 @@ def train_multitask(args):
     config = SimpleNamespace(**config)
 
     model = MultitaskBERT(config)
+    if args.load_model_state_dict_from_model_path is not None:
+        print(f"Loading model from {args.load_model_state_dict_from_model_path}")
+        saved = torch.load(args.load_model_state_dict_from_model_path)
+        model.load_state_dict(saved['model'])
+        print("Loaded model state")
+        print("Old config was", saved['model_config'])
+        print("New config is", model.config)
     model = model.to(device)
-
+    
     lr = args.lr
     optimizer = AdamW(model.parameters(), lr=lr)
     best_dev_acc = 0
@@ -479,7 +487,7 @@ def get_args():
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--option", type=str,
                         help='pretrain: the BERT parameters are frozen; finetune: BERT parameters are updated',
-                        choices=('pretrain', 'finetune'), default="pretrain")
+                        choices=('pretrain', 'finetune', 'lp_ft'), default="pretrain")
     parser.add_argument("--use_gpu", action='store_true')
 
     parser.add_argument("--sst_dev_out", type=str, default="predictions/sst-dev-output.csv")
@@ -494,6 +502,11 @@ def get_args():
     parser.add_argument("--batch_size", help='sst: 64, cfimdb: 8 can fit a 12GB GPU', type=int, default=8)
     parser.add_argument("--hidden_dropout_prob", type=float, default=0.3)
     parser.add_argument("--lr", type=float, help="learning rate", default=1e-5)
+    parser.add_argument(
+        "--load_model_state_dict_from_model_path",
+        type=str,
+        help='Only loads model state dict; does NOT load optimizer state, config, etc.; only for LP+FT'
+    )
 
     args = parser.parse_args()
     return args
@@ -501,6 +514,7 @@ def get_args():
 
 if __name__ == "__main__":
     args = get_args()
+    assert(args.load_model_state_dict_from_model_path is None or args.option == 'lp_ft')
     args.filepath = f'{args.option}-{args.epochs}-{args.lr}-multitask.pt' # Save path.
     seed_everything(args.seed)  # Fix the seed for reproducibility.
     train_multitask(args)

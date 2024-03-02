@@ -24,6 +24,7 @@ def seed_everything(seed=11711):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+    torch.mps.manual_seed(seed)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
@@ -237,7 +238,12 @@ def save_model(model, optimizer, args, config, filepath):
 
 
 def train(args):
-    device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+    # device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+    device = torch.device('cpu')
+    if args.use_gpu and torch.cuda.is_available():
+        device = torch.device('cuda')
+    elif args.use_gpu and torch.backends.mps.is_available():
+        device = torch.device('mps')
     # Create the data and its corresponding datasets and dataloader.
     train_data, num_labels = load_data(args.train, 'train')
     dev_data = load_data(args.dev, 'valid')
@@ -303,7 +309,12 @@ def train(args):
 
 def test(args):
     with torch.no_grad():
-        device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+        # device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+        device = torch.device('cpu')
+        if args.use_gpu and torch.cuda.is_available():
+            device = torch.device('cuda')
+        elif args.use_gpu and torch.backends.mps.is_available():
+            device = torch.device('mps')
         saved = torch.load(args.filepath)
         config = saved['model_config']
         model = BertSentimentClassifier(config)
