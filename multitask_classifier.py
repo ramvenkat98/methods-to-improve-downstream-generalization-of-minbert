@@ -76,7 +76,8 @@ class MultitaskBERT(nn.Module):
         self.config = config
         self.sentiment_linear = nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES)
         self.sentiment_dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.paraphrase_linear = nn.Linear(config.hidden_size, config.paraphrase_embedding_size)
+        self.paraphrase_linear_for_dot = nn.Linear(config.hidden_size, config.paraphrase_embedding_size)
+        self.paraphrase_final_linear = nn.Linear(config.hidden_size * 2 + config.paraphrase_embedding_size, 1)
         self.paraphrase_dropout = nn.Dropout(config.hidden_dropout_prob)
         self.similarity_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
         self.similarity_dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -113,17 +114,18 @@ class MultitaskBERT(nn.Module):
         during evaluation.
         '''
         ### TODO
-        embedding_1 = self.paraphrase_linear(
+        embedding_1 = self.paraphrase_linear_for_dot(
             self.paraphrase_dropout(
                 self.bert(input_ids_1, attention_mask_1)['pooler_output']
             )
         )
-        embedding_2 = self.paraphrase_linear(
+        embedding_2 = self.paraphrase_linear_for_dot(
             self.paraphrase_dropout(
                 self.bert(input_ids_2, attention_mask_2)['pooler_output']
             )
         )
-        return F.cosine_similarity(embedding_1, embedding_2)
+        intermediate = torch.concat((embedding_1, embedding_2, embedding_1 * embedding_2), dim=1)
+        return self.paraphrase_final_linear(intermediate)
 
 
     def predict_similarity(self,
