@@ -73,6 +73,7 @@ class MultitaskBERT(nn.Module):
                 param.requires_grad = True
         # You will want to add layers here to perform the downstream tasks.
         ### TODO
+        self.bert_embeddings_cache = {}
         self.config = config
         self.sentiment_linear = nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES)
         self.sentiment_dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -82,7 +83,7 @@ class MultitaskBERT(nn.Module):
         self.similarity_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
         self.similarity_dropout = nn.Dropout(config.hidden_dropout_prob)
 
-    def forward(self, input_ids, attention_mask):
+    def forward(self, input_ids, attention_mask, sent_ids, identifier):
         'Takes a batch of sentences and produces embeddings for them.'
         # The final BERT embedding is the hidden state of [CLS] token (the first token)
         # Here, you can start by just returning the embeddings straight from BERT.
@@ -92,7 +93,7 @@ class MultitaskBERT(nn.Module):
         return self.bert(input_ids, attention_mask)
 
 
-    def predict_sentiment(self, input_ids, attention_mask):
+    def predict_sentiment(self, input_ids, attention_mask, sent_ids):
         '''Given a batch of sentences, outputs logits for classifying sentiment.
         There are 5 sentiment classes:
         (0 - negative, 1- somewhat negative, 2- neutral, 3- somewhat positive, 4- positive)
@@ -101,48 +102,52 @@ class MultitaskBERT(nn.Module):
         ### TODO
         return self.sentiment_linear(
             self.sentiment_dropout(
-                self.bert(input_ids, attention_mask)['pooler_output']
+                self.bert(input_ids, attention_mask, sent_ids, 'sentiment')['pooler_output']
             )
         )
 
 
     def predict_paraphrase(self,
                            input_ids_1, attention_mask_1,
-                           input_ids_2, attention_mask_2):
+                           input_ids_2, attention_mask_2,
+                           sent_ids):
         '''Given a batch of pairs of sentences, outputs a single logit for predicting whether they are paraphrases.
         Note that your output should be unnormalized (a logit); it will be passed to the sigmoid function
         during evaluation.
         '''
         ### TODO
+        bert_embedding_1 = self.bert(input_ids_1, attention_mask_1, sent_ids, 'para_1')['pooler_output']
+        bert_embedding_2 = self.bert(input_ids_2, attention_mask_2, sent_ids, 'para_2')['pooler_output']
         embedding_1 = self.paraphrase_linear_for_dot(
             self.paraphrase_dropout(
-                self.bert(input_ids_1, attention_mask_1)['pooler_output']
+                bert_embedding_1
             )
         )
         embedding_2 = self.paraphrase_linear_for_dot(
             self.paraphrase_dropout(
-                self.bert(input_ids_2, attention_mask_2)['pooler_output']
+                bert_embedding_2
             )
         )
-        intermediate = torch.concat((embedding_1, embedding_2, embedding_1 * embedding_2), dim=1)
+        intermediate = torch.concat((bert_embedding_1, bert_embedding_2, embedding_1 * embedding_2), dim=1)
         return self.paraphrase_final_linear(intermediate)
 
 
     def predict_similarity(self,
                            input_ids_1, attention_mask_1,
-                           input_ids_2, attention_mask_2):
+                           input_ids_2, attention_mask_2,
+                           sent_ids):
         '''Given a batch of pairs of sentences, outputs a single logit corresponding to how similar they are.
         Note that your output should be unnormalized (a logit).
         '''
         ### TODO
         embedding_1 = self.similarity_linear(
             self.similarity_dropout(
-                self.bert(input_ids_1, attention_mask_1)['pooler_output']
+                self.bert(input_ids_1, attention_mask_1, sent_ids, 'similarity')['pooler_output']
             )
         )
         embedding_2 = self.similarity_linear(
             self.similarity_dropout(
-                self.bert(input_ids_2, attention_mask_2)['pooler_output']
+                self.bert(input_ids_2, attention_mask_2, sent_ids, 'similarity')['pooler_output']
             )
         )
         return F.cosine_similarity(embedding_1, embedding_2) * 5.0
@@ -169,15 +174,16 @@ def single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device
     num_batches = 0
     printed = 0
     for batch in tqdm(sst_train_dataloader, desc=f'train-sst-{epoch}', disable=TQDM_DISABLE):
-        b_ids, b_mask, b_labels = (batch['token_ids'],
-                                    batch['attention_mask'], batch['labels'])
-
+        b_ids, b_mask, b_labels, b_sent_ids = (batch['token_ids'],
+                                    batch['attention_mask'], batch['labels'], batch['sent_ids'])
+        if debug and num_batches < 5:
+            print(b_sent_ids[:5], b_ids.shape, b_sent_ids.shape, b_labels.shape)
         b_ids = b_ids.to(device)
         b_mask = b_mask.to(device)
         b_labels = b_labels.to(device)
 
         optimizer.zero_grad()
-        logits = model.predict_sentiment(b_ids, b_mask)
+        logits = model.predict_sentiment(b_ids, b_mask, b_sent_ids)
         if debug and printed < 5:
             print("sst", logits[:5, :], b_labels[:5])
             printed += 1
@@ -198,14 +204,16 @@ def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, devi
     num_batches = 0
     printed = 0
     for batch in tqdm(para_train_dataloader, desc=f'train-para-{epoch}', disable=TQDM_DISABLE):
-        b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels = (
+        b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels, b_sent_ids = (
             batch['token_ids_1'],
             batch['attention_mask_1'],
             batch['token_ids_2'],
             batch['attention_mask_2'],
             batch['labels'],
+            batch['sent_ids'],
         )
-
+        if debug and num_batches < 5:
+            print(b_ids_1[:5], b_ids_1.shape, b_ids_2[:5], b_ids_2.shape, b_sent_ids.shape, b_labels.shape)
         b_ids_1 = b_ids_1.to(device)
         b_mask_1 = b_mask_1.to(device)
         b_ids_2 = b_ids_2.to(device)
@@ -213,7 +221,7 @@ def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, devi
         b_labels = b_labels.to(device)
 
         optimizer.zero_grad()
-        logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
+        logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
         if debug and printed < 5:
             print("para", logits[:5], b_labels[:5])
             printed += 1
@@ -234,14 +242,16 @@ def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device
     num_batches = 0
     printed = 0
     for batch in tqdm(sts_train_dataloader, desc=f'train-sts-{epoch}', disable=TQDM_DISABLE):
-        b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels = (
+        b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels, b_sent_ids = (
             batch['token_ids_1'],
             batch['attention_mask_1'],
             batch['token_ids_2'],
             batch['attention_mask_2'],
             batch['labels'],
+            batch['sent_ids'],
         )
-
+        if debug and num_batches < 5:
+            print(b_ids_1[:5], b_ids_1.shape, b_ids_2[:5], b_ids_2.shape, b_sent_ids.shape, b_labels.shape)
         b_ids_1 = b_ids_1.to(device)
         b_mask_1 = b_mask_1.to(device)
         b_ids_2 = b_ids_2.to(device)
@@ -249,7 +259,7 @@ def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device
         b_labels = b_labels.to(device)
 
         optimizer.zero_grad()
-        predictions = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2)
+        predictions = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
         if debug and printed < 5:
             print("sts", predictions[:5], b_labels[:5])
             printed += 1
