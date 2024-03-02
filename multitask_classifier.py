@@ -308,8 +308,8 @@ def train_multitask(args):
     # Init model.
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
               'num_labels': num_labels,
-              'similarity_embedding_size': 32,
-              'paraphrase_embedding_size': 32,
+              'similarity_embedding_size': 64,
+              'paraphrase_embedding_size': 64,
               'hidden_size': 768,
               'data_dir': '.',
               'option': args.option}
@@ -332,7 +332,7 @@ def train_multitask(args):
 
     # Run for the specified number of epochs.
     exclude_sts = False
-    exclude_para = True
+    exclude_para = False
     exclude_sst = False
     debug = False
     for epoch in range(args.epochs):
