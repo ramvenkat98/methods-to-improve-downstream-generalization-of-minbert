@@ -332,7 +332,7 @@ def train_multitask(args):
 
     # Run for the specified number of epochs.
     exclude_sts = False
-    exclude_para = False
+    exclude_para = True
     exclude_sst = False
     debug = False
     for epoch in range(args.epochs):
