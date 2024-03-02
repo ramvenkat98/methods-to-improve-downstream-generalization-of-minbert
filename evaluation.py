@@ -53,7 +53,9 @@ def model_eval_multitask(sentiment_dataloader,
                          model,
                          device,
                          limit_batches = None,
-                         exclude_para = False):
+                         exclude_sts = False,
+                         exclude_para = False,
+                         exclude_sst = False):
     model.eval()  # Switch to eval model, will turn off randomness like dropout.
 
     with torch.no_grad():
@@ -74,7 +76,7 @@ def model_eval_multitask(sentiment_dataloader,
             sst_y_pred.extend(y_hat)
             sst_y_true.extend(b_labels)
             sst_sent_ids.extend(b_sent_ids)
-            if limit_batches is not None and step > limit_batches:
+            if exclude_sst or (limit_batches is not None and step > limit_batches):
                 break
 
         sentiment_accuracy = np.mean(np.array(sst_y_pred) == np.array(sst_y_true))
@@ -130,11 +132,17 @@ def model_eval_multitask(sentiment_dataloader,
             sts_y_pred.extend(y_hat)
             sts_y_true.extend(b_labels)
             sts_sent_ids.extend(b_sent_ids)
-            if limit_batches is not None and step > limit_batches:
+            if exclude_sts or (limit_batches is not None and step > limit_batches):
                 break
         pearson_mat = np.corrcoef(sts_y_pred,sts_y_true)
         sts_corr = pearson_mat[1][0]
 
+        if exclude_sts:
+            sentiment_accuracy = 0.0
+        if exclude_para:
+            paraphrase_accuracy = 0.0
+        if exclude_sst:
+            sts_corr = -1.0
         print(f'Sentiment classification accuracy: {sentiment_accuracy:.3f}')
         print(f'Paraphrase detection accuracy: {paraphrase_accuracy:.3f}')
         print(f'Semantic Textual Similarity correlation: {sts_corr:.3f}')

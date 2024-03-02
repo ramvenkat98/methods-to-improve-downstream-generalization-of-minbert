@@ -123,7 +123,7 @@ class MultitaskBERT(nn.Module):
                 self.bert(input_ids_2, attention_mask_2)['pooler_output']
             )
         )
-        return torch.sum(embedding_1 * embedding_2, dim = 1)
+        return F.cosine_similarity(embedding_1, embedding_2)
 
 
     def predict_similarity(self,
@@ -331,16 +331,24 @@ def train_multitask(args):
     best_dev_acc = 0
 
     # Run for the specified number of epochs.
+    exclude_sts = False
     exclude_para = False
+    exclude_sst = False
     debug = False
     for epoch in range(args.epochs):
         model.train()
-        sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, debug = debug)
+        if exclude_sts:
+            sts_train_loss = -1
+        else:
+            sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, debug = debug)
         if exclude_para:
             para_train_loss = -1
         else:
             para_train_loss = single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device, debug = debug)
-        sst_train_loss = single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, debug = debug)
+        if exclude_sst:
+            sst_train_loss = -1
+        else:
+            sst_train_loss = single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, debug = debug)
         print(f"Epoch {epoch}: train loss :: {sst_train_loss :.3f}, {para_train_loss :.3f}, {sts_train_loss :.3f}")
         print(f"Epoch {epoch}: train data stats")
         sst_train_acc, _, _, para_train_acc, _, _, sts_train_acc, _, _ = model_eval_multitask(
@@ -350,7 +358,9 @@ def train_multitask(args):
             model,
             device,
             limit_batches = 100,
+            exclude_sts = exclude_sts,
             exclude_para = exclude_para,
+            exclude_sst = exclude_sst,
         )
         print(f"Epoch {epoch}: dev data stats")
         sst_dev_acc, _, _, para_dev_acc, _, _, sts_dev_acc, _, _ = model_eval_multitask(
@@ -360,7 +370,9 @@ def train_multitask(args):
             model,
             device,
             limit_batches = None,
+            exclude_sts = exclude_sts,
             exclude_para = exclude_para,
+            exclude_sst = exclude_sst,
         )
         # train_acc, train_f1, *_ = model_eval_sst(sst_train_dataloader, model, device)
         # dev_acc, dev_f1, *_ = model_eval_sst(sst_dev_dataloader, model, device)
