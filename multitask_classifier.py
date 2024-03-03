@@ -551,7 +551,7 @@ def get_args():
 if __name__ == "__main__":
     args = get_args()
     assert(args.load_model_state_dict_from_model_path is None or args.option == 'lp_ft')
-    args.filepath = f'{args.option}-{args.epochs}-{args.lr}-multitask.pt' # Save path.
+    args.filepath = f'{args.option}-{args.epochs}-{args.lr}-{args.batch_size}-multitask.pt' # Save path.
     seed_everything(args.seed)  # Fix the seed for reproducibility.
     train_multitask(args)
     test_multitask(args)
