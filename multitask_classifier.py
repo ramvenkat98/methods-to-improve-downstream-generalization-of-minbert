@@ -80,8 +80,7 @@ class MultitaskBERT(nn.Module):
         self.paraphrase_linear_for_dot = nn.Linear(config.hidden_size, config.paraphrase_embedding_size)
         self.paraphrase_final_linear = nn.Linear(config.hidden_size * 2 + config.paraphrase_embedding_size, 1)
         self.paraphrase_dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.similarity_linear_for_dot = nn.Linear(config.hidden_size, config.similarity_embedding_size)
-        self.similarity_final_linear = nn.Linear(config.hidden_size * 2 + config.similarity_embedding_size, 1)
+        self.similarity_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
         self.similarity_dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, input_ids, attention_mask, sent_ids, identifier):
@@ -149,20 +148,17 @@ class MultitaskBERT(nn.Module):
         Note that your output should be unnormalized (a logit).
         '''
         ### TODO
-        bert_embedding_1 = self.forward(input_ids_1, attention_mask_1, sent_ids, 'similarity')
-        bert_embedding_2 = self.forward(input_ids_2, attention_mask_2, sent_ids, 'similarity')
-        embedding_1 = self.similarity_linear_for_dot(
+        embedding_1 = self.similarity_linear(
             self.similarity_dropout(
-                bert_embedding_1
+                self.forward(input_ids_1, attention_mask_1, sent_ids, 'similarity')
             )
         )
-        embedding_2 = self.similarity_linear_for_dot(
+        embedding_2 = self.similarity_linear(
             self.similarity_dropout(
-                bert_embedding_2
+                self.forward(input_ids_2, attention_mask_2, sent_ids, 'similarity')
             )
         )
-        intermediate = torch.concat((bert_embedding_1, bert_embedding_2, embedding_1 * embedding_2), dim=1)
-        return self.similarity_final_linear(intermediate).view(-1)
+        return F.cosine_similarity(embedding_1, embedding_2) * 5.0
 
 
 
