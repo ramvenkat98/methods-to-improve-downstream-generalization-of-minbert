@@ -83,13 +83,27 @@ class MultitaskBERT(nn.Module):
         ### TODO
         self.bert_embeddings_cache = {}
         self.config = config
-        self.sentiment_linear = nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES)
+        # shared weights
+        self.shared_linear_initial = nn.Linear(config.hidden_size, config.shared_linear_initial_size)
+        self.shared_linear_initial_dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.shared_linear_final = nn.Linear(config.shared_linear_initial_size, config.shared_linear_final_size)
+        self.shared_linear_final_dropout = nn.Dropout(config.hidden_dropout_prob)
+        # dedicated weights for sentiment
+        self.sentiment_linear = nn.Linear(config.hidden_size, config.sentiment_embedding_size)
         self.sentiment_dropout = nn.Dropout(config.hidden_dropout_prob)
+        # overarching weights for sentiment
+        self.sentiment_overarch = nn.Linear(config.sentiment_embedding_size + config.shared_linear_final_size, N_SENTIMENT_CLASSES)
+        # dedicated weights for paraphrase
         self.paraphrase_linear_for_dot = nn.Linear(config.hidden_size, config.paraphrase_embedding_size)
-        self.paraphrase_final_linear = nn.Linear(config.hidden_size * 2 + config.paraphrase_embedding_size, 1)
+        self.paraphrase_final_linear = nn.Linear(config.hidden_size * 2 + config.paraphrase_embedding_size, config.paraphrase_embedding_size)
         self.paraphrase_dropout = nn.Dropout(config.hidden_dropout_prob)
+        # overarching weights for paraphrase
+        self.paraphrase_overarch = nn.Linear(config.paraphrase_embedding_size + config.shared_linear_final_size, 1)
+        # dedicated weights for similarity
         self.similarity_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
         self.similarity_dropout = nn.Dropout(config.hidden_dropout_prob)
+        # overarching weights for similarity
+        self.similarity_overarch = nn.Linear(config.similarity_embedding_size + config.shared_linear_final_size, config.similarity_embedding_size)
 
     def forward(self, input_ids, attention_mask, sent_ids, identifier):
         'Takes a batch of sentences and produces embeddings for them.'
@@ -107,6 +121,17 @@ class MultitaskBERT(nn.Module):
             return result
         else:
             return self.bert(input_ids, attention_mask)['pooler_output']
+    
+    def get_shared_arch_output(self, bert_embedding):
+        return self.shared_linear_final(
+            self.shared_linear_final_dropout(
+                self.shared_linear_initial(
+                    self.shared_linear_initial_dropout(
+                        bert_embedding
+                    )
+                )
+            )
+        )
 
 
     def predict_sentiment(self, input_ids, attention_mask, sent_ids=None):
@@ -116,25 +141,30 @@ class MultitaskBERT(nn.Module):
         Thus, your output should contain 5 logits for each sentence.
         '''
         ### TODO
-        return self.sentiment_linear(
+        bert_embedding = self.forward(input_ids, attention_mask, sent_ids, 'sentiment')
+        shared_arch_output = self.get_shared_arch_output(bert_embedding)
+        dedicated_arch_output = self.sentiment_linear(
             self.sentiment_dropout(
-                self.forward(input_ids, attention_mask, sent_ids, 'sentiment')
-            )
-        )
-
-
-    def get_paraphrase_embedding_and_bert_embedding(self, input_id, attention_mask, sent_ids, identifier):
-        bert_embedding = self.forward(input_id, attention_mask, sent_ids, identifier)
-        embedding = self.paraphrase_linear_for_dot(
-            self.paraphrase_dropout(
                 bert_embedding
             )
         )
-        return embedding, bert_embedding
+        return self.sentiment_overarch(
+            torch.cat((shared_arch_output, dedicated_arch_output), dim=1)
+        )
 
-    def predict_paraphrase_given_embeddings(self, embedding_1, embedding_2, bert_embedding_1, bert_embedding_2):
-        intermediate = torch.concat((bert_embedding_1, bert_embedding_2, embedding_1 * embedding_2), dim=1)
-        return self.paraphrase_final_linear(intermediate).view(-1)
+    # TODO address these functions when we re-try multiple negatives loss
+    # def get_paraphrase_embedding_and_bert_embedding(self, input_id, attention_mask, sent_ids, identifier):
+    #     bert_embedding = self.forward(input_id, attention_mask, sent_ids, identifier)
+    #     embedding = self.paraphrase_linear_for_dot(
+    #         self.paraphrase_dropout(
+    #             bert_embedding
+    #         )
+    #     )
+    #     return embedding, bert_embedding
+
+    # def predict_paraphrase_given_embeddings(self, embedding_1, embedding_2, bert_embedding_1, bert_embedding_2):
+    #     intermediate = torch.concat((bert_embedding_1, bert_embedding_2, embedding_1 * embedding_2), dim=1)
+    #     return self.paraphrase_final_linear(intermediate).view(-1)
 
     def predict_paraphrase(self,
                            input_ids_1, attention_mask_1,
@@ -144,24 +174,49 @@ class MultitaskBERT(nn.Module):
         Note that your output should be unnormalized (a logit); it will be passed to the sigmoid function
         during evaluation.
         '''
-        ### TODO
-        embedding_1, bert_embedding_1 = self.get_paraphrase_embedding_and_bert_embedding(
-            input_ids_1, attention_mask_1, sent_ids, 'para_1'
-        )
-        embedding_2, bert_embedding_2 = self.get_paraphrase_embedding_and_bert_embedding(
-            input_ids_2, attention_mask_2, sent_ids, 'para_2'
-        )
-        return self.predict_paraphrase_given_embeddings(embedding_1, embedding_2, bert_embedding_1, bert_embedding_2)
-
-    def get_similarity_embedding(self, input_id, attention_mask, sent_ids, identifier):
-        return self.similarity_linear(
-            self.similarity_dropout(
-                self.forward(input_id, attention_mask, sent_ids, identifier)
+        ### TODO address this part when we re-try multiple negatives loss
+        # embedding_1, bert_embedding_1 = self.get_paraphrase_embedding_and_bert_embedding(
+        #     input_ids_1, attention_mask_1, sent_ids, 'para_1'
+        # )
+        # embedding_2, bert_embedding_2 = self.get_paraphrase_embedding_and_bert_embedding(
+        #     input_ids_2, attention_mask_2, sent_ids, 'para_2'
+        # )
+        # return self.predict_paraphrase_given_embeddings(embedding_1, embedding_2, bert_embedding_1, bert_embedding_2)
+        bert_embedding_1 = self.forward(input_ids_1, attention_mask_1, sent_ids, 'para_1')
+        bert_embedding_2 = self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2')
+        shared_arch_output_1 = self.get_shared_arch_output(bert_embedding_1)
+        shared_arch_output_2 = self.get_shared_arch_output(bert_embedding_2)
+        dedicated_arch_output_1 = self.paraphrase_linear_for_dot(
+            self.paraphrase_dropout(
+                bert_embedding_1
             )
         )
+        dedicated_arch_output_2 = self.paraphrase_linear_for_dot(
+            self.paraphrase_dropout(
+                bert_embedding_2
+            )
+        )
+        dedicated_arch_intermediate = torch.concat((bert_embedding_1, bert_embedding_2, dedicated_arch_output_1 * dedicated_arch_output_2), dim=1)
+        dedicated_arch_output = self.paraphrase_final_linear(dedicated_arch_intermediate)
+        overarch_input = torch.cat(
+            (
+                shared_arch_output_1 * shared_arch_output_2,
+                dedicated_arch_output
+            ),
+            dim=1
+        )
+        return self.paraphrase_overarch(overarch_input).view(-1)
+    
+    # TODO address these functions when we re-try multiple negatives loss
+    # def get_similarity_embedding(self, input_id, attention_mask, sent_ids, identifier):
+    #     return self.similarity_linear(
+    #         self.similarity_dropout(
+    #             self.forward(input_id, attention_mask, sent_ids, identifier)
+    #         )
+    #     )
 
-    def predict_similarity_given_embedding(self, embedding_1, embedding_2):
-        return F.cosine_similarity(embedding_1, embedding_2) * 5.0
+    # def predict_similarity_given_embedding(self, embedding_1, embedding_2):
+    #     return F.cosine_similarity(embedding_1, embedding_2) * 5.0
     
     def predict_similarity(self,
                            input_ids_1, attention_mask_1,
@@ -170,10 +225,30 @@ class MultitaskBERT(nn.Module):
         '''Given a batch of pairs of sentences, outputs a single logit corresponding to how similar they are.
         Note that your output should be unnormalized (a logit).
         '''
-        ### TODO
-        embedding_1 = self.get_similarity_embedding(input_ids_1, attention_mask_1, sent_ids, 'similarity_1')
-        embedding_2 = self.get_similarity_embedding(input_ids_2, attention_mask_2, sent_ids, 'similarity_2')
-        return self.predict_similarity_given_embedding(embedding_1, embedding_2)
+        # TODO address these functions when we re-try multiple negatives loss
+        # embedding_1 = self.get_similarity_embedding(input_ids_1, attention_mask_1, sent_ids, 'similarity_1')
+        # embedding_2 = self.get_similarity_embedding(input_ids_2, attention_mask_2, sent_ids, 'similarity_2')
+        # return self.predict_similarity_given_embedding(embedding_1, embedding_2)
+        bert_embedding_1 = self.forward(input_ids_1, attention_mask_1, sent_ids, 'similarity_1')
+        bert_embedding_2 = self.forward(input_ids_2, attention_mask_2, sent_ids, 'similarity_2')
+        shared_arch_output_1 = self.get_shared_arch_output(bert_embedding_1)
+        shared_arch_output_2 = self.get_shared_arch_output(bert_embedding_2)
+        dedicated_arch_output_1 = self.similarity_linear(
+            self.similarity_dropout(
+                bert_embedding_1
+            )
+        )
+        dedicated_arch_output_2 = self.similarity_linear(
+            self.similarity_dropout(
+                bert_embedding_2
+            )
+        )
+        overarch_input_1 = torch.cat((shared_arch_output_1, dedicated_arch_output_1), dim=1)
+        overarch_input_2 = torch.cat((shared_arch_output_2, dedicated_arch_output_2), dim=1)
+        return F.cosine_similarity(
+            self.similarity_overarch(overarch_input_1),
+            self.similarity_overarch(overarch_input_2),
+        ) * 5.0
         
 
 
@@ -245,9 +320,10 @@ def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, devi
         b_labels = b_labels.to(device)
 
         optimizer.zero_grad()
-        embeddings_1, bert_embeddings_1 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_1, b_mask_1, b_sent_ids, 'para_1')
-        embeddings_2, bert_embeddings_2 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_2, b_mask_2, b_sent_ids, 'para_2')
-        logits = model.predict_paraphrase_given_embeddings(embeddings_1, embeddings_2, bert_embeddings_1, bert_embeddings_2)
+        logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
+        # embeddings_1, bert_embeddings_1 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_1, b_mask_1, b_sent_ids, 'para_1')
+        # embeddings_2, bert_embeddings_2 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_2, b_mask_2, b_sent_ids, 'para_2')
+        # logits = model.predict_paraphrase_given_embeddings(embeddings_1, embeddings_2, bert_embeddings_1, bert_embeddings_2)
         multi_negatives_ranking_loss = 0 # get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'mean')
         loss = F.binary_cross_entropy_with_logits(logits, b_labels.view(-1).float(), reduction='sum') / args.batch_size
         if debug and printed < 5:
@@ -287,19 +363,20 @@ def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device
         b_labels = b_labels.to(device)
 
         optimizer.zero_grad()
-        embeddings_1 = model.get_similarity_embedding(b_ids_1, b_mask_1, b_sent_ids, 'similarity_1')
-        embeddings_2 = model.get_similarity_embedding(b_ids_2, b_mask_2, b_sent_ids, 'similarity_2')
-        predictions = model.predict_similarity_given_embedding(embeddings_1, embeddings_2)
-        multi_negatives_ranking_loss = get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'none')
+        predictions = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
+        # embeddings_1 = model.get_similarity_embedding(b_ids_1, b_mask_1, b_sent_ids, 'similarity_1')
+        # embeddings_2 = model.get_similarity_embedding(b_ids_2, b_mask_2, b_sent_ids, 'similarity_2')
+        # predictions = model.predict_similarity_given_embedding(embeddings_1, embeddings_2)
+        # multi_negatives_ranking_loss = get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'none')
         # We should weight the multi-negatives-ranking-loss by the similarity of the texts.
         # Only use ones with similarity >= 4.
         # TODO Consider softer weighting by similarity score.
-        multi_negatives_ranking_loss = torch.sum((b_labels >= 4) * multi_negatives_ranking_loss) / args.batch_size
+        multi_negatives_ranking_loss = 0 # torch.sum((b_labels >= 4) * multi_negatives_ranking_loss) / args.batch_size
         loss = F.mse_loss(predictions, b_labels.view(-1).float(), reduction='sum') / args.batch_size
         if debug and printed < 5:
             print("sts", predictions[:5], b_labels[:5], loss, multi_negatives_ranking_loss)
             printed += 1
-        loss = loss + multi_negatives_ranking_loss
+        loss = loss # + multi_negatives_ranking_loss
         loss.backward()
         optimizer.step()
 
@@ -355,8 +432,11 @@ def train_multitask(args):
     # Init model.
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
               'num_labels': num_labels,
-              'similarity_embedding_size': 64,
-              'paraphrase_embedding_size': 64,
+              'sentiment_embedding_size': 128,
+              'similarity_embedding_size': 128,
+              'paraphrase_embedding_size': 128,
+              'shared_linear_initial_size': 512,
+              'shared_linear_final_size': 256,
               'hidden_size': 768,
               'data_dir': '.',
               'option': args.option}
@@ -379,8 +459,8 @@ def train_multitask(args):
 
     # Run for the specified number of epochs.
     exclude_sts = False
-    exclude_para = True
-    exclude_sst = True
+    exclude_para = False
+    exclude_sst = False
     debug = False
     for epoch in range(args.epochs):
         model.train()
