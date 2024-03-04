@@ -53,6 +53,14 @@ def seed_everything(seed=11711):
 BERT_HIDDEN_SIZE = 768
 N_SENTIMENT_CLASSES = 5
 
+def get_multi_negatives_ranking_loss(a, b, reduction='mean'):
+    # Here, I'm following the implementation of MultiNegativesRankingLoss from the sentence_transformers library
+    # for the case of cosine similarity specifically.
+    # Reference: https://github.com/UKPLab/sentence-transformers/blob/master/sentence_transformers/losses/MultipleNegativesRankingLoss.py
+    embeddings_1_norm = torch.nn.functional.normalize(a, p=2, dim=1)
+    embeddings_2_norm = torch.nn.functional.normalize(b, p=2, dim=1)
+    similarity_matrix = torch.mm(a, b.transpose(0, 1))
+    return F.cross_entropy(similarity_matrix, torch.arange(similarity_matrix.shape[0]), reduction=reduction)
 
 class MultitaskBERT(nn.Module):
     '''
@@ -115,6 +123,19 @@ class MultitaskBERT(nn.Module):
         )
 
 
+    def get_paraphrase_embedding_and_bert_embedding(self, input_id, attention_mask, sent_ids, identifier):
+        bert_embedding = self.forward(input_id, attention_mask, sent_ids, identifier)
+        embedding = self.paraphrase_linear_for_dot(
+            self.paraphrase_dropout(
+                bert_embedding
+            )
+        )
+        return embedding, bert_embedding
+
+    def predict_paraphrase_given_embeddings(self, embedding_1, embedding_2, bert_embedding_1, bert_embedding_2):
+        intermediate = torch.concat((bert_embedding_1, bert_embedding_2, embedding_1 * embedding_2), dim=1)
+        return self.paraphrase_final_linear(intermediate).view(-1)
+
     def predict_paraphrase(self,
                            input_ids_1, attention_mask_1,
                            input_ids_2, attention_mask_2,
@@ -124,20 +145,13 @@ class MultitaskBERT(nn.Module):
         during evaluation.
         '''
         ### TODO
-        bert_embedding_1 = self.forward(input_ids_1, attention_mask_1, sent_ids, 'para_1')
-        bert_embedding_2 = self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2')
-        embedding_1 = self.paraphrase_linear_for_dot(
-            self.paraphrase_dropout(
-                bert_embedding_1
-            )
+        embedding_1, bert_embedding_1 = self.get_paraphrase_embedding_and_bert_embedding(
+            input_ids_1, attention_mask_1, sent_ids, 'para_1'
         )
-        embedding_2 = self.paraphrase_linear_for_dot(
-            self.paraphrase_dropout(
-                bert_embedding_2
-            )
+        embedding_2, bert_embedding_2 = self.get_paraphrase_embedding_and_bert_embedding(
+            input_ids_2, attention_mask_2, sent_ids, 'para_2'
         )
-        intermediate = torch.concat((bert_embedding_1, bert_embedding_2, embedding_1 * embedding_2), dim=1)
-        return self.paraphrase_final_linear(intermediate).view(-1)
+        return self.predict_paraphrase_given_embeddings(embedding_1, embedding_2, bert_embedding_1, bert_embedding_2)
 
 
     def predict_similarity(self,
@@ -221,7 +235,7 @@ def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, devi
             batch['sent_ids'],
         )
         if debug and num_batches < 5:
-            print(b_ids_1[:5], b_ids_2[:5], b_sent_ids[:5], b_labels[:5])
+            print(b_sent_ids[:5], b_labels[:5])
         b_ids_1 = b_ids_1.to(device)
         b_mask_1 = b_mask_1.to(device)
         b_ids_2 = b_ids_2.to(device)
@@ -229,12 +243,16 @@ def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, devi
         b_labels = b_labels.to(device)
 
         optimizer.zero_grad()
-        logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
+        embeddings_1, bert_embeddings_1 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_1, b_mask_1, b_sent_ids, 'para_1')
+        embeddings_2, bert_embeddings_2 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_2, b_mask_2, b_sent_ids, 'para_2')
+        logits = model.predict_paraphrase_given_embeddings(embeddings_1, embeddings_2, bert_embeddings_1, bert_embeddings_2)
+        multi_negatives_ranking_loss = get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'mean')
+        loss = F.binary_cross_entropy_with_logits(logits, b_labels.view(-1).float(), reduction='sum') / args.batch_size
         if debug and printed < 5:
             print("para", logits[:5], b_labels[:5])
+            print("para loss", loss, "multi negatives ranking loss", multi_negatives_ranking_loss)
             printed += 1
-        loss = F.binary_cross_entropy_with_logits(logits, b_labels.view(-1).float(), reduction='sum') / args.batch_size
-
+        loss = 0.85 * loss + 0.15 * multi_negatives_ranking_loss
         loss.backward()
         optimizer.step()
 
@@ -351,9 +369,9 @@ def train_multitask(args):
     best_dev_acc = 0
 
     # Run for the specified number of epochs.
-    exclude_sts = False
+    exclude_sts = True
     exclude_para = False
-    exclude_sst = False
+    exclude_sst = True
     debug = False
     for epoch in range(args.epochs):
         model.train()
