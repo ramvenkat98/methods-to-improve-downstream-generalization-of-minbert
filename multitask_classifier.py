@@ -299,7 +299,7 @@ def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device
         if debug and printed < 5:
             print("sts", predictions[:5], b_labels[:5], loss, multi_negatives_ranking_loss)
             printed += 1
-        loss = loss + multi_negatives_ranking_loss
+        # loss = 3.0 * loss # + 5 * multi_negatives_ranking_loss
         loss.backward()
         optimizer.step()
 
@@ -379,8 +379,8 @@ def train_multitask(args):
 
     # Run for the specified number of epochs.
     exclude_sts = False
-    exclude_para = True
-    exclude_sst = True
+    exclude_para = False
+    exclude_sst = False
     debug = False
     for epoch in range(args.epochs):
         model.train()
