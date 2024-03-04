@@ -461,6 +461,8 @@ def train_multitask(args):
     exclude_sts = False
     exclude_para = False
     exclude_sst = False
+    exclude_para = False
+    exclude_sst = False
     debug = False
     for epoch in range(args.epochs):
         model.train()
