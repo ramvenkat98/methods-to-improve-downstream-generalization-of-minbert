@@ -25,15 +25,17 @@ from optimizer import AdamW
 from tqdm import tqdm
 
 from datasets import (
+    SentenceAllDataset,
     SentenceClassificationDataset,
     SentenceClassificationTestDataset,
     SentencePairDataset,
     SentencePairTestDataset,
-    load_multitask_data
+    load_multitask_data,
+    BatchSamplerAllDataset
 )
 
 from evaluation import model_eval_sst, model_eval_multitask, model_eval_test_multitask
-
+from torch.utils.data import IterableDataset
 
 TQDM_DISABLE=False
 
@@ -266,14 +268,10 @@ def save_model(model, optimizer, args, config, filepath):
     torch.save(save_info, filepath)
     print(f"save the model to {filepath}")
 
-def single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, debug=False):
-    train_loss = 0
-    num_batches = 0
-    printed = 0
-    for batch in tqdm(sst_train_dataloader, desc=f'train-sst-{epoch}', disable=TQDM_DISABLE):
+def single_batch_train_sst(batch, model, optimizer, device, debug=False):
         b_ids, b_mask, b_labels, b_sent_ids = (batch['token_ids'],
                                     batch['attention_mask'], batch['labels'], batch['sent_ids'])
-        if debug and num_batches < 5:
+        if debug:
             print(b_sent_ids[:5], b_ids[:5], b_sent_ids[:5], b_labels[:5])
         b_ids = b_ids.to(device)
         b_mask = b_mask.to(device)
@@ -281,109 +279,150 @@ def single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device
 
         optimizer.zero_grad()
         logits = model.predict_sentiment(b_ids, b_mask, b_sent_ids)
-        if debug and printed < 5:
+        if debug:
             print("sst", logits[:5, :], b_labels[:5])
             printed += 1
         loss = F.cross_entropy(logits, b_labels.view(-1), reduction='sum') / args.batch_size
-
         loss.backward()
         optimizer.step()
+        train_loss = loss.item()
+        return train_loss
 
-        train_loss += loss.item()
+def single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, debug=False):
+    train_loss = 0
+    num_batches = 0
+    for batch in tqdm(sst_train_dataloader, desc=f'train-sst-{epoch}', disable=TQDM_DISABLE):
+        train_loss += single_batch_train_sst(batch, model, optimizer, device, debug)
         num_batches += 1
         if debug and num_batches >= 5:
             break
     train_loss = train_loss / (num_batches)
     return train_loss
 
+def single_batch_train_para(batch, model, optimizer, device, debug=False):
+    b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels, b_sent_ids = (
+        batch['token_ids_1'],
+        batch['attention_mask_1'],
+        batch['token_ids_2'],
+        batch['attention_mask_2'],
+        batch['labels'],
+        batch['sent_ids'],
+    )
+    if debug:
+        print(b_sent_ids[:5], b_labels[:5])
+    b_ids_1 = b_ids_1.to(device)
+    b_mask_1 = b_mask_1.to(device)
+    b_ids_2 = b_ids_2.to(device)
+    b_mask_2 = b_mask_2.to(device)
+    b_labels = b_labels.to(device)
+
+    optimizer.zero_grad()
+    logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
+    # embeddings_1, bert_embeddings_1 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_1, b_mask_1, b_sent_ids, 'para_1')
+    # embeddings_2, bert_embeddings_2 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_2, b_mask_2, b_sent_ids, 'para_2')
+    # logits = model.predict_paraphrase_given_embeddings(embeddings_1, embeddings_2, bert_embeddings_1, bert_embeddings_2)
+    multi_negatives_ranking_loss = 0 # get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'mean')
+    loss = F.binary_cross_entropy_with_logits(logits, b_labels.view(-1).float(), reduction='sum') / args.batch_size
+    if debug:
+        print("para", logits[:5], b_labels[:5])
+        print("para loss", loss, "multi negatives ranking loss", multi_negatives_ranking_loss)
+        printed += 1
+    # loss = 0.85 * loss + 0.15 * multi_negatives_ranking_loss
+    loss.backward()
+    optimizer.step()
+    train_loss = loss.item()
+    return train_loss
+
+
 def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device, debug=False):
     train_loss = 0
     num_batches = 0
-    printed = 0
     for batch in tqdm(para_train_dataloader, desc=f'train-para-{epoch}', disable=TQDM_DISABLE):
-        b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels, b_sent_ids = (
-            batch['token_ids_1'],
-            batch['attention_mask_1'],
-            batch['token_ids_2'],
-            batch['attention_mask_2'],
-            batch['labels'],
-            batch['sent_ids'],
-        )
-        if debug and num_batches < 5:
-            print(b_sent_ids[:5], b_labels[:5])
-        b_ids_1 = b_ids_1.to(device)
-        b_mask_1 = b_mask_1.to(device)
-        b_ids_2 = b_ids_2.to(device)
-        b_mask_2 = b_mask_2.to(device)
-        b_labels = b_labels.to(device)
-
-        optimizer.zero_grad()
-        logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
-        # embeddings_1, bert_embeddings_1 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_1, b_mask_1, b_sent_ids, 'para_1')
-        # embeddings_2, bert_embeddings_2 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_2, b_mask_2, b_sent_ids, 'para_2')
-        # logits = model.predict_paraphrase_given_embeddings(embeddings_1, embeddings_2, bert_embeddings_1, bert_embeddings_2)
-        multi_negatives_ranking_loss = 0 # get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'mean')
-        loss = F.binary_cross_entropy_with_logits(logits, b_labels.view(-1).float(), reduction='sum') / args.batch_size
-        if debug and printed < 5:
-            print("para", logits[:5], b_labels[:5])
-            print("para loss", loss, "multi negatives ranking loss", multi_negatives_ranking_loss)
-            printed += 1
-        # loss = 0.85 * loss + 0.15 * multi_negatives_ranking_loss
-        loss.backward()
-        optimizer.step()
-
-        train_loss += loss.item()
+        train_loss += single_batch_train_para(batch, model, optimizer, device, debug)
         num_batches += 1
         if debug and num_batches >= 5:
             break
     train_loss = train_loss / (num_batches)
+    return train_loss
+
+def single_batch_train_sts(batch, model, optimizer, device, debug=False):
+    b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels, b_sent_ids = (
+        batch['token_ids_1'],
+        batch['attention_mask_1'],
+        batch['token_ids_2'],
+        batch['attention_mask_2'],
+        batch['labels'],
+        batch['sent_ids'],
+    )
+    if debug:
+        print(b_sent_ids[:5], b_labels[:5])
+    b_ids_1 = b_ids_1.to(device)
+    b_mask_1 = b_mask_1.to(device)
+    b_ids_2 = b_ids_2.to(device)
+    b_mask_2 = b_mask_2.to(device)
+    b_labels = b_labels.to(device)
+
+    optimizer.zero_grad()
+    predictions = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
+    # embeddings_1 = model.get_similarity_embedding(b_ids_1, b_mask_1, b_sent_ids, 'similarity_1')
+    # embeddings_2 = model.get_similarity_embedding(b_ids_2, b_mask_2, b_sent_ids, 'similarity_2')
+    # predictions = model.predict_similarity_given_embedding(embeddings_1, embeddings_2)
+    # multi_negatives_ranking_loss = get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'none')
+    # We should weight the multi-negatives-ranking-loss by the similarity of the texts.
+    # Only use ones with similarity >= 4.
+    # TODO Consider softer weighting by similarity score.
+    multi_negatives_ranking_loss = 0 # torch.sum((b_labels >= 4) * multi_negatives_ranking_loss) / args.batch_size
+    loss = F.mse_loss(predictions, b_labels.view(-1).float(), reduction='sum') / args.batch_size
+    if debug:
+        print("sts", predictions[:5], b_labels[:5], loss, multi_negatives_ranking_loss)
+        printed += 1
+    loss = loss # + multi_negatives_ranking_loss
+    loss.backward()
+    optimizer.step()
+    train_loss = loss.item()
     return train_loss
 
 def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, debug=False):
     train_loss = 0
     num_batches = 0
-    printed = 0
     for batch in tqdm(sts_train_dataloader, desc=f'train-sts-{epoch}', disable=TQDM_DISABLE):
-        b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels, b_sent_ids = (
-            batch['token_ids_1'],
-            batch['attention_mask_1'],
-            batch['token_ids_2'],
-            batch['attention_mask_2'],
-            batch['labels'],
-            batch['sent_ids'],
-        )
-        if debug and num_batches < 5:
-            print(b_sent_ids[:5], b_labels[:5])
-        b_ids_1 = b_ids_1.to(device)
-        b_mask_1 = b_mask_1.to(device)
-        b_ids_2 = b_ids_2.to(device)
-        b_mask_2 = b_mask_2.to(device)
-        b_labels = b_labels.to(device)
-
-        optimizer.zero_grad()
-        predictions = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
-        # embeddings_1 = model.get_similarity_embedding(b_ids_1, b_mask_1, b_sent_ids, 'similarity_1')
-        # embeddings_2 = model.get_similarity_embedding(b_ids_2, b_mask_2, b_sent_ids, 'similarity_2')
-        # predictions = model.predict_similarity_given_embedding(embeddings_1, embeddings_2)
-        # multi_negatives_ranking_loss = get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'none')
-        # We should weight the multi-negatives-ranking-loss by the similarity of the texts.
-        # Only use ones with similarity >= 4.
-        # TODO Consider softer weighting by similarity score.
-        multi_negatives_ranking_loss = 0 # torch.sum((b_labels >= 4) * multi_negatives_ranking_loss) / args.batch_size
-        loss = F.mse_loss(predictions, b_labels.view(-1).float(), reduction='sum') / args.batch_size
-        if debug and printed < 5:
-            print("sts", predictions[:5], b_labels[:5], loss, multi_negatives_ranking_loss)
-            printed += 1
-        loss = loss # + multi_negatives_ranking_loss
-        loss.backward()
-        optimizer.step()
-
-        train_loss += loss.item()
+        train_loss += single_batch_train_sts(batch, model, optimizer, device, debug)
         num_batches += 1
         if debug and num_batches >= 5:
             break
     train_loss = train_loss / (num_batches)
     return train_loss
+
+def single_epoch_train_all(
+        train_dataloader,
+        epoch,
+        model,
+        optimizer,
+        device,
+        debug=False,
+        exclude_sst = False,
+        exclude_para = False,
+        exclude_sts = False
+    ):
+    sst_train_loss, num_sst_batches = 0, 0
+    para_train_loss, num_para_batches = 0, 0
+    sts_train_loss, num_sts_batches = 0, 0
+    for batch in tqdm(train_dataloader, desc=f'train-all-{epoch}', disable=TQDM_DISABLE):
+        if batch['dataset_name'] == 'sentiment' and not exclude_sst:
+            sst_train_loss += single_batch_train_sst(batch, model, optimizer, device, debug)
+            num_sst_batches += 1
+        elif batch['dataset_name'] == 'paraphrase' and not exclude_para:
+            para_train_loss += single_batch_train_para(batch, model, optimizer, device, debug)
+            num_para_batches += 1
+        elif batch['dataset_name'] == 'similarity' and not exclude_sts:
+            sts_train_loss += single_batch_train_sts(batch, model, optimizer, device, debug)
+            num_sts_batches += 1
+        if debug and num_sst_batches + num_para_batches + num_sts_batches >= 5:
+            break
+    def get_loss(loss, num_batches):
+        print(f"Loss of {loss} after {num_batches} batches")
+        return loss / num_batches if num_batches > 0 else -1
+    return get_loss(sst_train_loss, num_sst_batches), get_loss(para_train_loss, num_para_batches), get_loss(sts_train_loss, num_sts_batches)
 
 def train_multitask(args):
     '''Train MultitaskBERT.
@@ -402,31 +441,43 @@ def train_multitask(args):
     # Create the data and its corresponding datasets and dataloader.
     sst_train_data, num_labels,para_train_data, sts_train_data = load_multitask_data(args.sst_train,args.para_train,args.sts_train, split ='train')
     sst_dev_data, num_labels,para_dev_data, sts_dev_data = load_multitask_data(args.sst_dev,args.para_dev,args.sts_dev, split ='train')
+    if not args.use_even_batching:
+        sst_train_data = SentenceClassificationDataset(sst_train_data, args)
+        sst_train_dataloader = DataLoader(sst_train_data, shuffle=True, batch_size=args.batch_size,
+                                        collate_fn=sst_train_data.collate_fn)
+        para_train_data = SentencePairDataset(para_train_data, args)
+        para_train_dataloader = DataLoader(para_train_data, shuffle=True, batch_size=args.batch_size,
+                                        collate_fn=para_train_data.collate_fn)
+        sts_train_data = SentencePairDataset(sts_train_data, args, isRegression = True)
 
-    sst_train_data = SentenceClassificationDataset(sst_train_data, args)
-    sst_dev_data = SentenceClassificationDataset(sst_dev_data, args)
-
-    sst_train_dataloader = DataLoader(sst_train_data, shuffle=True, batch_size=args.batch_size,
-                                      collate_fn=sst_train_data.collate_fn)
-    sst_dev_dataloader = DataLoader(sst_dev_data, shuffle=False, batch_size=args.batch_size,
-                                    collate_fn=sst_dev_data.collate_fn)
-    
-    para_train_data = SentencePairDataset(para_train_data, args)
-    para_dev_data = SentencePairDataset(para_dev_data, args)
-
-    para_train_dataloader = DataLoader(para_train_data, shuffle=True, batch_size=args.batch_size,
-                                      collate_fn=para_train_data.collate_fn)
-    para_dev_dataloader = DataLoader(para_dev_data, shuffle=False, batch_size=args.batch_size,
-                                    collate_fn=para_dev_data.collate_fn)
-
-    sts_train_data = SentencePairDataset(sts_train_data, args)
-    sts_dev_data = SentencePairDataset(sts_dev_data, args)
-
-    sts_train_dataloader = DataLoader(sts_train_data, shuffle=True, batch_size=args.batch_size,
-                                      collate_fn=para_train_data.collate_fn)
-    sts_dev_dataloader = DataLoader(sts_dev_data, shuffle=False, batch_size=args.batch_size,
-                                    collate_fn=para_dev_data.collate_fn)
-
+        sts_train_dataloader = DataLoader(sts_train_data, shuffle=True, batch_size=args.batch_size,
+                                        collate_fn=para_train_data.collate_fn)
+    else:
+        train_data = SentenceAllDataset([sst_train_data, para_train_data, sts_train_data], args)
+        train_batch_sampler = BatchSamplerAllDataset(train_data.datasets, args.batch_size, shuffle = True)
+        dev_data = SentenceAllDataset([sst_dev_data, para_dev_data, sts_dev_data], args)
+        dev_batch_sampler = BatchSamplerAllDataset(dev_data.datasets, args.batch_size, shuffle = False)
+        train_dataloader = DataLoader(train_data, collate_fn = train_data.collate_fn, batch_sampler = train_batch_sampler)
+        dev_dataloader = DataLoader(dev_data, collate_fn = dev_data.collate_fn, batch_sampler = dev_batch_sampler)
+        # test the dataloader
+        '''
+        for epoch in range(args.epochs):
+            print("Epoch", epoch)
+            batches_by_dataset = {}
+            for batch in tqdm(train_dataloader, desc=f'testing-new-dataloader', disable=TQDM_DISABLE):
+                dataset_name = batch['dataset_name']
+                batches_by_dataset[dataset_name] = batches_by_dataset.get(dataset_name, 0) + 1
+            print("Batches by dataset is", batches_by_dataset)
+        '''
+        sst_dev_data = SentenceClassificationDataset(sst_dev_data, args)
+        sst_dev_dataloader = DataLoader(sst_dev_data, shuffle=False, batch_size=args.batch_size,
+                                collate_fn=sst_dev_data.collate_fn)
+        para_dev_data = SentencePairDataset(para_dev_data, args)
+        para_dev_dataloader = DataLoader(para_dev_data, shuffle=False, batch_size=args.batch_size,
+                                collate_fn=para_dev_data.collate_fn)
+        sts_dev_data = SentencePairDataset(sts_dev_data, args, isRegression = True)
+        sts_dev_dataloader = DataLoader(sts_dev_data, shuffle=False, batch_size=args.batch_size,
+                                        collate_fn=para_dev_data.collate_fn)
     # Init model.
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
               'num_labels': num_labels,
@@ -463,18 +514,31 @@ def train_multitask(args):
     debug = False
     for epoch in range(args.epochs):
         model.train()
-        if exclude_sts:
-            sts_train_loss = -1
+        if not args.use_even_batching:
+            if exclude_sts:
+                sts_train_loss = -1
+            else:
+                sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, debug = debug)
+            if exclude_para:
+                para_train_loss = -1
+            else:
+                para_train_loss = single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device, debug = debug)
+            if exclude_sst:
+                sst_train_loss = -1
+            else:
+                sst_train_loss = single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, debug = debug)
         else:
-            sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, debug = debug)
-        if exclude_para:
-            para_train_loss = -1
-        else:
-            para_train_loss = single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device, debug = debug)
-        if exclude_sst:
-            sst_train_loss = -1
-        else:
-            sst_train_loss = single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, debug = debug)
+            sst_train_loss, para_train_loss, sts_train_loss = single_epoch_train_all(
+                train_dataloader,
+                epoch,
+                model,
+                optimizer,
+                device,
+                debug = debug,
+                exclude_sst = exclude_sst,
+                exclude_para = exclude_para,
+                exclude_sts = exclude_sts
+            )
         print(f"Epoch {epoch}: train loss :: {sst_train_loss :.3f}, {para_train_loss :.3f}, {sts_train_loss :.3f}")
         '''
         print(f"Epoch {epoch}: train data stats")
@@ -649,6 +713,7 @@ def get_args():
         type=str,
         help='Only loads model state dict; does NOT load optimizer state, config, etc.; only for LP+FT'
     )
+    parser.add_argument("--use_even_batching", action='store_true')
 
     args = parser.parse_args()
     return args
