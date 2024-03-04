@@ -86,8 +86,8 @@ class MultitaskBERT(nn.Module):
         # shared weights
         self.shared_linear_initial = nn.Linear(config.hidden_size, config.shared_linear_initial_size)
         self.shared_linear_initial_dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.shared_linear_final = nn.Linear(config.shared_linear_initial_size, config.shared_linear_final_size)
-        self.shared_linear_final_dropout = nn.Dropout(config.hidden_dropout_prob)
+        # self.shared_linear_final = nn.Linear(config.shared_linear_initial_size, config.shared_linear_final_size)
+        # self.shared_linear_final_dropout = nn.Dropout(config.hidden_dropout_prob)
         # dedicated weights for sentiment
         self.sentiment_linear = nn.Linear(config.hidden_size, config.sentiment_embedding_size)
         self.sentiment_dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -123,13 +123,11 @@ class MultitaskBERT(nn.Module):
             return self.bert(input_ids, attention_mask)['pooler_output']
     
     def get_shared_arch_output(self, bert_embedding):
-        return self.shared_linear_final(
-            self.shared_linear_final_dropout(
-                self.shared_linear_initial(
-                    self.shared_linear_initial_dropout(
-                        bert_embedding
-                    )
-                )
+        # return self.shared_linear_final(
+        # self.shared_linear_final_dropout(
+        return self.shared_linear_initial(
+            self.shared_linear_initial_dropout(
+                bert_embedding
             )
         )
 
@@ -432,11 +430,12 @@ def train_multitask(args):
     # Init model.
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
               'num_labels': num_labels,
-              'sentiment_embedding_size': 128,
-              'similarity_embedding_size': 128,
-              'paraphrase_embedding_size': 128,
-              'shared_linear_initial_size': 512,
-              'shared_linear_final_size': 256,
+              'sentiment_embedding_size': 64,
+              'similarity_embedding_size': 64,
+              'paraphrase_embedding_size': 64,
+              'shared_linear_initial_size': 64,
+              # currently we don't use final - must be same dim as initial
+              'shared_linear_final_size': 64,
               'hidden_size': 768,
               'data_dir': '.',
               'option': args.option}
@@ -459,8 +458,6 @@ def train_multitask(args):
 
     # Run for the specified number of epochs.
     exclude_sts = False
-    exclude_para = False
-    exclude_sst = False
     exclude_para = False
     exclude_sst = False
     debug = False
