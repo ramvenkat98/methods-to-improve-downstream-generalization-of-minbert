@@ -60,7 +60,7 @@ def get_multi_negatives_ranking_loss(a, b, reduction='mean'):
     embeddings_1_norm = torch.nn.functional.normalize(a, p=2, dim=1)
     embeddings_2_norm = torch.nn.functional.normalize(b, p=2, dim=1)
     similarity_matrix = torch.mm(a, b.transpose(0, 1))
-    return F.cross_entropy(similarity_matrix, torch.arange(similarity_matrix.shape[0]), reduction=reduction)
+    return F.cross_entropy(similarity_matrix, torch.arange(similarity_matrix.shape[0], device = a.device), reduction=reduction)
 
 class MultitaskBERT(nn.Module):
     '''
@@ -153,7 +153,16 @@ class MultitaskBERT(nn.Module):
         )
         return self.predict_paraphrase_given_embeddings(embedding_1, embedding_2, bert_embedding_1, bert_embedding_2)
 
+    def get_similarity_embedding(self, input_id, attention_mask, sent_ids, identifier):
+        return self.similarity_linear(
+            self.similarity_dropout(
+                self.forward(input_id, attention_mask, sent_ids, identifier)
+            )
+        )
 
+    def predict_similarity_given_embedding(self, embedding_1, embedding_2):
+        return F.cosine_similarity(embedding_1, embedding_2) * 5.0
+    
     def predict_similarity(self,
                            input_ids_1, attention_mask_1,
                            input_ids_2, attention_mask_2,
@@ -162,17 +171,10 @@ class MultitaskBERT(nn.Module):
         Note that your output should be unnormalized (a logit).
         '''
         ### TODO
-        embedding_1 = self.similarity_linear(
-            self.similarity_dropout(
-                self.forward(input_ids_1, attention_mask_1, sent_ids, 'similarity')
-            )
-        )
-        embedding_2 = self.similarity_linear(
-            self.similarity_dropout(
-                self.forward(input_ids_2, attention_mask_2, sent_ids, 'similarity')
-            )
-        )
-        return F.cosine_similarity(embedding_1, embedding_2) * 5.0
+        embedding_1 = self.get_similarity_embedding(input_ids_1, attention_mask_1, sent_ids, 'similarity_1')
+        embedding_2 = self.get_similarity_embedding(input_ids_2, attention_mask_2, sent_ids, 'similarity_2')
+        return self.predict_similarity_given_embedding(embedding_1, embedding_2)
+        
 
 
 
@@ -246,13 +248,13 @@ def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, devi
         embeddings_1, bert_embeddings_1 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_1, b_mask_1, b_sent_ids, 'para_1')
         embeddings_2, bert_embeddings_2 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_2, b_mask_2, b_sent_ids, 'para_2')
         logits = model.predict_paraphrase_given_embeddings(embeddings_1, embeddings_2, bert_embeddings_1, bert_embeddings_2)
-        multi_negatives_ranking_loss = get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'mean')
+        multi_negatives_ranking_loss = 0 # get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'mean')
         loss = F.binary_cross_entropy_with_logits(logits, b_labels.view(-1).float(), reduction='sum') / args.batch_size
         if debug and printed < 5:
             print("para", logits[:5], b_labels[:5])
             print("para loss", loss, "multi negatives ranking loss", multi_negatives_ranking_loss)
             printed += 1
-        loss = 0.85 * loss + 0.15 * multi_negatives_ranking_loss
+        # loss = 0.85 * loss + 0.15 * multi_negatives_ranking_loss
         loss.backward()
         optimizer.step()
 
@@ -277,7 +279,7 @@ def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device
             batch['sent_ids'],
         )
         if debug and num_batches < 5:
-            print(b_ids_1[:5], b_ids_2[:5], b_sent_ids[:5], b_labels[:5])
+            print(b_sent_ids[:5], b_labels[:5])
         b_ids_1 = b_ids_1.to(device)
         b_mask_1 = b_mask_1.to(device)
         b_ids_2 = b_ids_2.to(device)
@@ -285,12 +287,19 @@ def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device
         b_labels = b_labels.to(device)
 
         optimizer.zero_grad()
-        predictions = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
-        if debug and printed < 5:
-            print("sts", predictions[:5], b_labels[:5])
-            printed += 1
+        embeddings_1 = model.get_similarity_embedding(b_ids_1, b_mask_1, b_sent_ids, 'similarity_1')
+        embeddings_2 = model.get_similarity_embedding(b_ids_2, b_mask_2, b_sent_ids, 'similarity_2')
+        predictions = model.predict_similarity_given_embedding(embeddings_1, embeddings_2)
+        multi_negatives_ranking_loss = get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'none')
+        # We should weight the multi-negatives-ranking-loss by the similarity of the texts.
+        # Only use ones with similarity >= 4.
+        # TODO Consider softer weighting by similarity score.
+        multi_negatives_ranking_loss = torch.sum((b_labels >= 4) * multi_negatives_ranking_loss) / args.batch_size
         loss = F.mse_loss(predictions, b_labels.view(-1).float(), reduction='sum') / args.batch_size
-
+        if debug and printed < 5:
+            print("sts", predictions[:5], b_labels[:5], loss, multi_negatives_ranking_loss)
+            printed += 1
+        loss = loss + multi_negatives_ranking_loss
         loss.backward()
         optimizer.step()
 
@@ -369,8 +378,8 @@ def train_multitask(args):
     best_dev_acc = 0
 
     # Run for the specified number of epochs.
-    exclude_sts = True
-    exclude_para = False
+    exclude_sts = False
+    exclude_para = True
     exclude_sst = True
     debug = False
     for epoch in range(args.epochs):
