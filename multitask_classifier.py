@@ -255,7 +255,7 @@ def save_model(model, optimizer, args, config, filepath):
     torch.save(save_info, filepath)
     print(f"save the model to {filepath}")
 
-def single_batch_train_sst(batch, model, optimizer, device, debug=False):
+def single_batch_train_sst(batch, model, optimizer, device, adv_teacher, debug=False):
         b_ids, b_mask, b_labels, b_sent_ids = (batch['token_ids'],
                                     batch['attention_mask'], batch['labels'], batch['sent_ids'])
         if debug:
@@ -275,18 +275,18 @@ def single_batch_train_sst(batch, model, optimizer, device, debug=False):
         train_loss = loss.item()
         return train_loss
 
-def single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, debug=False):
+def single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, adv_teacher, debug=False):
     train_loss = 0
     num_batches = 0
     for batch in tqdm(sst_train_dataloader, desc=f'train-sst-{epoch}', disable=TQDM_DISABLE):
-        train_loss += single_batch_train_sst(batch, model, optimizer, device, debug)
+        train_loss += single_batch_train_sst(batch, model, optimizer, device, adv_teacher, debug)
         num_batches += 1
         if debug and num_batches >= 5:
             break
     train_loss = train_loss / (num_batches)
     return train_loss
 
-def single_batch_train_para(batch, model, optimizer, device, debug=False):
+def single_batch_train_para(batch, model, optimizer, device, adv_teacher, debug=False):
     b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels, b_sent_ids = (
         batch['token_ids_1'],
         batch['attention_mask_1'],
@@ -321,11 +321,11 @@ def single_batch_train_para(batch, model, optimizer, device, debug=False):
     return train_loss
 
 
-def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device, debug=False):
+def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device, adv_teacher, debug=False):
     train_loss = 0
     num_batches = 0
     for batch in tqdm(para_train_dataloader, desc=f'train-para-{epoch}', disable=TQDM_DISABLE):
-        train_loss += single_batch_train_para(batch, model, optimizer, device, debug)
+        train_loss += single_batch_train_para(batch, model, optimizer, device, adv_teacher, debug)
         num_batches += 1
         if debug and num_batches >= 5:
             break
@@ -389,24 +389,25 @@ def single_epoch_train_all(
         model,
         optimizer,
         device,
-        adv_teacher,
+        adv_teachers,
         debug=False,
         exclude_sst = False,
         exclude_para = False,
         exclude_sts = False
     ):
+    adv_teacher_similarity, adv_teacher_paraphrase, adv_teacher_sentiment = adv_teachers
     sst_train_loss, num_sst_batches = 0, 0
     para_train_loss, num_para_batches = 0, 0
     sts_train_loss, num_sts_batches = 0, 0
     for batch in tqdm(train_dataloader, desc=f'train-all-{epoch}', disable=TQDM_DISABLE):
         if batch['dataset_name'] == 'sentiment' and not exclude_sst:
-            sst_train_loss += single_batch_train_sst(batch, model, optimizer, device, debug)
+            sst_train_loss += single_batch_train_sst(batch, model, optimizer, device, adv_teacher_sentiment, debug)
             num_sst_batches += 1
         elif batch['dataset_name'] == 'paraphrase' and not exclude_para:
-            para_train_loss += single_batch_train_para(batch, model, optimizer, device, debug)
+            para_train_loss += single_batch_train_para(batch, model, optimizer, device, adv_teacher_paraphrase, debug)
             num_para_batches += 1
         elif batch['dataset_name'] == 'similarity' and not exclude_sts:
-            sts_train_loss += single_batch_train_sts(batch, model, optimizer, device, adv_teacher, debug)
+            sts_train_loss += single_batch_train_sts(batch, model, optimizer, device, adv_teacher_similarity, debug)
             num_sts_batches += 1
         if debug and num_sst_batches + num_para_batches + num_sts_batches >= 5:
             break
@@ -472,12 +473,12 @@ def train_multitask(args):
     # Init model.
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
               'num_labels': num_labels,
-              'sentiment_embedding_size': 128,
-              'similarity_embedding_size': 128,
-              'paraphrase_embedding_size': 128,
-              'shared_linear_initial_size': 128,
+              'sentiment_embedding_size': 256,
+              'similarity_embedding_size': 256,
+              'paraphrase_embedding_size': 256,
+              'shared_linear_initial_size': 256,
               # currently we don't use final - must be same dim as initial
-              'shared_linear_final_size': 128,
+              'shared_linear_final_size': 256,
               'hidden_size': 768,
               'data_dir': '.',
               'option': args.option}
@@ -498,9 +499,13 @@ def train_multitask(args):
     print("Learning rate of", lr, "for", args.epochs, "epochs")
     optimizer = AdamW(model.parameters(), lr=lr)
     best_dev_acc = 0
-    adv_teacher = None
+    adv_teacher_similarity = None
+    adv_teacher_paraphrase = None
+    adv_teacher_sentiment = None
     if args.adv_train:
-        adv_teacher = SmartPerturbation()
+        adv_teacher_similarity = SmartPerturbation()
+        adv_teacher_paraphrase = SmartPerturbation()
+        adv_teacher_sentiment = SmartPerturbation()
 
     # Run for the specified number of epochs.
     exclude_sts = False
@@ -513,15 +518,15 @@ def train_multitask(args):
             if exclude_sts:
                 sts_train_loss = -1
             else:
-                sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, adv_teacher, debug = debug)
+                sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, adv_teacher_similarity, debug = debug)
             if exclude_para:
                 para_train_loss = -1
             else:
-                para_train_loss = single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device, debug = debug)
+                para_train_loss = single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device, adv_teacher_paraphrase, debug = debug)
             if exclude_sst:
                 sst_train_loss = -1
             else:
-                sst_train_loss = single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, debug = debug)
+                sst_train_loss = single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, adv_teacher_sentiment, debug = debug)
         else:
             sst_train_loss, para_train_loss, sts_train_loss = single_epoch_train_all(
                 train_dataloader,
@@ -529,7 +534,7 @@ def train_multitask(args):
                 model,
                 optimizer,
                 device,
-                adv_teacher,
+                (adv_teacher_similarity, adv_teacher_paraphrase, adv_teacher_sentiment),
                 debug = debug,
                 exclude_sst = exclude_sst,
                 exclude_para = exclude_para,
