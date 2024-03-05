@@ -366,7 +366,7 @@ def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, debug=F
     if debug:
         print("sts", predictions[:5], b_labels[:5], loss, multi_negatives_ranking_loss)
         printed += 1
-    loss = loss + 10 * multi_negatives_ranking_loss + 3 * adv_loss
+    loss = loss + 10 * multi_negatives_ranking_loss + 50 * adv_loss
     loss.backward()
     optimizer.step()
     train_loss = loss.item()
@@ -472,12 +472,12 @@ def train_multitask(args):
     # Init model.
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
               'num_labels': num_labels,
-              'sentiment_embedding_size': 64,
-              'similarity_embedding_size': 64,
-              'paraphrase_embedding_size': 64,
-              'shared_linear_initial_size': 64,
+              'sentiment_embedding_size': 128,
+              'similarity_embedding_size': 128,
+              'paraphrase_embedding_size': 128,
+              'shared_linear_initial_size': 128,
               # currently we don't use final - must be same dim as initial
-              'shared_linear_final_size': 64,
+              'shared_linear_final_size': 128,
               'hidden_size': 768,
               'data_dir': '.',
               'option': args.option}
@@ -495,6 +495,7 @@ def train_multitask(args):
     model = model.to(device)
     
     lr = args.lr
+    print("Learning rate of", lr, "for", args.epochs, "epochs")
     optimizer = AdamW(model.parameters(), lr=lr)
     best_dev_acc = 0
     adv_teacher = None
@@ -503,8 +504,8 @@ def train_multitask(args):
 
     # Run for the specified number of epochs.
     exclude_sts = False
-    exclude_para = True
-    exclude_sst = True
+    exclude_para = False
+    exclude_sst = False
     debug = False
     for epoch in range(args.epochs):
         model.train()
