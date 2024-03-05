@@ -34,8 +34,9 @@ from datasets import (
     BatchSamplerAllDataset
 )
 
-from evaluation import model_eval_sst, model_eval_multitask, model_eval_test_multitask
-from torch.utils.data import IterableDataset
+from evaluation import model_eval_multitask, model_eval_test_multitask
+
+from perturbation import SmartPerturbation
 
 TQDM_DISABLE=False
 
@@ -206,15 +207,25 @@ class MultitaskBERT(nn.Module):
             dim=1
         )
         return self.paraphrase_overarch(overarch_input).view(-1)
-    
-    def get_similarity_embedding(self, input_id, attention_mask, sent_ids, identifier):
-        bert_embedding = self.forward(input_id, attention_mask, sent_ids, identifier)
+
+    def get_similarity_embedding_given_bert_embedding(self, bert_embedding):
         shared_arch_output = self.get_shared_arch_output(bert_embedding)
         dedicated_arch_output = self.similarity_linear(self.similarity_dropout(bert_embedding))
         return torch.cat((shared_arch_output, dedicated_arch_output), dim=1)
+    
+    def get_similarity_embedding(self, input_id, attention_mask, sent_ids, identifier):
+        bert_embedding = self.forward(input_id, attention_mask, sent_ids, identifier)
+        return self.get_similarity_embedding_given_bert_embedding(bert_embedding)
 
     def predict_similarity_given_embedding(self, embedding_1, embedding_2):
         return F.cosine_similarity(embedding_1, embedding_2) * 5.0
+
+    def predict_similarity_given_bert_input_embeds(self, input_embed_1, attention_mask_1, input_embed_2, attention_mask_2):
+        bert_embedding_1 = self.bert.forward_given_input_embeds(input_embed_1, attention_mask_1)['pooler_output']
+        bert_embedding_2 = self.bert.forward_given_input_embeds(input_embed_2, attention_mask_2)['pooler_output']
+        embedding_1 = self.get_similarity_embedding_given_bert_embedding(bert_embedding_1)
+        embedding_2 = self.get_similarity_embedding_given_bert_embedding(bert_embedding_2)
+        return self.predict_similarity_given_embedding(embedding_1, embedding_2)
     
     def predict_similarity(self,
                            input_ids_1, attention_mask_1,
@@ -321,7 +332,7 @@ def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, devi
     train_loss = train_loss / (num_batches)
     return train_loss
 
-def single_batch_train_sts(batch, model, optimizer, device, debug=False):
+def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, debug=False):
     b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels, b_sent_ids = (
         batch['token_ids_1'],
         batch['attention_mask_1'],
@@ -349,20 +360,23 @@ def single_batch_train_sts(batch, model, optimizer, device, debug=False):
     C = sum(np.exp(np.arange(1, 5)))
     multi_negatives_ranking_loss = torch.sum((b_labels >= 1) * torch.exp(b_labels) / C * multi_negatives_ranking_loss) / args.batch_size
     loss = F.mse_loss(predictions, b_labels.view(-1).float(), reduction='sum') / args.batch_size
+    adv_loss = 0
+    if adv_teacher is not None:
+        adv_loss = adv_teacher.forward(model, predictions, b_ids_1, b_mask_1, b_ids_2, b_mask_2, 'similarity')
     if debug:
         print("sts", predictions[:5], b_labels[:5], loss, multi_negatives_ranking_loss)
         printed += 1
-    loss = loss + 10 * multi_negatives_ranking_loss
+    loss = loss + 10 * multi_negatives_ranking_loss + 3 * adv_loss
     loss.backward()
     optimizer.step()
     train_loss = loss.item()
     return train_loss
 
-def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, debug=False):
+def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, adv_teacher, debug=False):
     train_loss = 0
     num_batches = 0
     for batch in tqdm(sts_train_dataloader, desc=f'train-sts-{epoch}', disable=TQDM_DISABLE):
-        train_loss += single_batch_train_sts(batch, model, optimizer, device, debug)
+        train_loss += single_batch_train_sts(batch, model, optimizer, device, adv_teacher, debug)
         num_batches += 1
         if debug and num_batches >= 5:
             break
@@ -375,6 +389,7 @@ def single_epoch_train_all(
         model,
         optimizer,
         device,
+        adv_teacher,
         debug=False,
         exclude_sst = False,
         exclude_para = False,
@@ -391,7 +406,7 @@ def single_epoch_train_all(
             para_train_loss += single_batch_train_para(batch, model, optimizer, device, debug)
             num_para_batches += 1
         elif batch['dataset_name'] == 'similarity' and not exclude_sts:
-            sts_train_loss += single_batch_train_sts(batch, model, optimizer, device, debug)
+            sts_train_loss += single_batch_train_sts(batch, model, optimizer, device, adv_teacher, debug)
             num_sts_batches += 1
         if debug and num_sst_batches + num_para_batches + num_sts_batches >= 5:
             break
@@ -482,11 +497,14 @@ def train_multitask(args):
     lr = args.lr
     optimizer = AdamW(model.parameters(), lr=lr)
     best_dev_acc = 0
+    adv_teacher = None
+    if args.adv_train:
+        adv_teacher = SmartPerturbation()
 
     # Run for the specified number of epochs.
     exclude_sts = False
-    exclude_para = False
-    exclude_sst = False
+    exclude_para = True
+    exclude_sst = True
     debug = False
     for epoch in range(args.epochs):
         model.train()
@@ -494,7 +512,7 @@ def train_multitask(args):
             if exclude_sts:
                 sts_train_loss = -1
             else:
-                sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, debug = debug)
+                sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, adv_teacher, debug = debug)
             if exclude_para:
                 para_train_loss = -1
             else:
@@ -510,6 +528,7 @@ def train_multitask(args):
                 model,
                 optimizer,
                 device,
+                adv_teacher,
                 debug = debug,
                 exclude_sst = exclude_sst,
                 exclude_para = exclude_para,
@@ -690,6 +709,7 @@ def get_args():
         help='Only loads model state dict; does NOT load optimizer state, config, etc.; only for LP+FT'
     )
     parser.add_argument("--use_even_batching", action='store_true')
+    parser.add_argument("--adv_train", action='store_true')
 
     args = parser.parse_args()
     return args
