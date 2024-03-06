@@ -211,38 +211,22 @@ class MultitaskBERT(nn.Module):
         # )
         # return self.predict_paraphrase_given_embeddings(embedding_1, embedding_2, bert_embedding_1, bert_embedding_2)
         if self.disable_complex_arch:
-            bert_embedding_1 = self.forward(input_ids_1, attention_mask_1, sent_ids, 'para_1')
-            bert_embedding_2 = self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2')
-            intermediate_output_1 = self.paraphrase_linear_for_dot(
-                self.paraphrase_linear_for_dot_dropout(
-                    bert_embedding_1
-                )
-            )    
-            intermediate_output_2 = self.paraphrase_linear_for_dot(
-                self.paraphrase_linear_for_dot_dropout(
-                    bert_embedding_2
-                )
-            )
+            bert_embedding_1 = self.paraphrase_linear_for_dot_dropout(self.forward(input_ids_1, attention_mask_1, sent_ids, 'para_1'))
+            bert_embedding_2 = self.paraphrase_linear_for_dot_dropout(self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2'))
+            intermediate_output_1 = self.paraphrase_linear_for_dot(bert_embedding_1)    
+            intermediate_output_2 = self.paraphrase_linear_for_dot(bert_embedding_2)
             combined_intermediate_output = torch.concat((bert_embedding_1, bert_embedding_2, intermediate_output_1 * intermediate_output_2), dim=1)
             return self.paraphrase_final_linear(
                 self.paraphrase_final_dropout(
                     combined_intermediate_output
                 )
             ).view(-1)
-        bert_embedding_1 = self.forward(input_ids_1, attention_mask_1, sent_ids, 'para_1')
-        bert_embedding_2 = self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2')
+        bert_embedding_1 = self.paraphrase_dropout(self.forward(input_ids_1, attention_mask_1, sent_ids, 'para_1'))
+        bert_embedding_2 = self.paraphrase_dropout(self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2'))
         shared_arch_output_1 = self.get_shared_arch_output(bert_embedding_1)
         shared_arch_output_2 = self.get_shared_arch_output(bert_embedding_2)
-        dedicated_arch_output_1 = self.paraphrase_linear_for_dot(
-            self.paraphrase_dropout(
-                bert_embedding_1
-            )
-        )
-        dedicated_arch_output_2 = self.paraphrase_linear_for_dot(
-            self.paraphrase_dropout(
-                bert_embedding_2
-            )
-        )
+        dedicated_arch_output_1 = self.paraphrase_linear_for_dot(bert_embedding_1)
+        dedicated_arch_output_2 = self.paraphrase_linear_for_dot(bert_embedding_2)
         dedicated_arch_intermediate = torch.concat((bert_embedding_1, bert_embedding_2, dedicated_arch_output_1 * dedicated_arch_output_2), dim=1)
         dedicated_arch_output = self.paraphrase_final_linear(self.paraphrase_final_dropout(dedicated_arch_intermediate))
         overarch_input = torch.cat(
