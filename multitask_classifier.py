@@ -80,7 +80,7 @@ class MultitaskBERT(nn.Module):
         for param in self.bert.parameters():
             if config.option == 'pretrain':
                 param.requires_grad = False
-            elif config.option == 'finetune' or config.option == 'lp_ft':
+            elif config.option in ('finetune', 'lp_ft', 'finetune_after_additional_pretraining'):
                 param.requires_grad = True
         # You will want to add layers here to perform the downstream tasks.
         ### TODO
@@ -694,7 +694,7 @@ def get_args():
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--option", type=str,
                         help='pretrain: the BERT parameters are frozen; finetune: BERT parameters are updated',
-                        choices=('pretrain', 'finetune', 'lp_ft'), default="pretrain")
+                        choices=('pretrain', 'finetune', 'lp_ft', 'finetune_after_additional_pretraining'), default="pretrain")
     parser.add_argument("--use_gpu", action='store_true')
 
     parser.add_argument("--sst_dev_out", type=str, default="predictions/sst-dev-output.csv")
@@ -723,7 +723,7 @@ def get_args():
 
 if __name__ == "__main__":
     args = get_args()
-    assert(args.load_model_state_dict_from_model_path is None or args.option == 'lp_ft')
+    assert(args.load_model_state_dict_from_model_path is None or args.option in ('lp_ft', 'finetune_after_additional_pretraining'))
     args.filepath = f'{args.option}-{args.epochs}-{args.lr}-{args.batch_size}-multitask.pt' # Save path.
     seed_everything(args.seed)  # Fix the seed for reproducibility.
     train_multitask(args)
