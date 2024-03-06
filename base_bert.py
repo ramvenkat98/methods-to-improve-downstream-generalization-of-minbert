@@ -109,7 +109,7 @@ class BertPreTrainedModel(nn.Module):
 
     # Instantiate model.
     model = cls(config, *model_args, **model_kwargs)
-
+    print(resolved_archive_file)
     if state_dict is None:
       try:
         state_dict = torch.load(resolved_archive_file, map_location="cpu")

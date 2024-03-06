@@ -75,7 +75,10 @@ class MultitaskBERT(nn.Module):
     '''
     def __init__(self, config):
         super(MultitaskBERT, self).__init__()
-        self.bert = BertModel.from_pretrained('bert-base-uncased')
+        if config.load_model_state_dict_from_model_path is not None:
+            self.bert = BertModel.from_pretrained(config.load_model_state_dict_from_model_path)
+        else:
+            self.bert = BertModel.from_pretrained('bert-base-uncased')
         # Pretrain mode does not require updating BERT paramters.
         for param in self.bert.parameters():
             if config.option == 'pretrain':
@@ -481,12 +484,13 @@ def train_multitask(args):
               'shared_linear_final_size': 128,
               'hidden_size': 768,
               'data_dir': '.',
+              'load_model_state_dict_from_model_path': args.load_model_state_dict_from_model_path if args.option == 'finetune_after_additional_pretraining' else None,
               'option': args.option}
 
     config = SimpleNamespace(**config)
 
     model = MultitaskBERT(config)
-    if args.load_model_state_dict_from_model_path is not None:
+    if args.option == 'lp_ft' and args.load_model_state_dict_from_model_path is not None:
         print(f"Loading model from {args.load_model_state_dict_from_model_path}")
         saved = torch.load(args.load_model_state_dict_from_model_path)
         model.load_state_dict(saved['model'])
@@ -724,6 +728,8 @@ def get_args():
 if __name__ == "__main__":
     args = get_args()
     assert(args.load_model_state_dict_from_model_path is None or args.option in ('lp_ft', 'finetune_after_additional_pretraining'))
+    if args.option == 'finetune_after_additional_pretraining':
+        assert(args.load_model_state_dict_from_model_path is not None)
     args.filepath = f'{args.option}-{args.epochs}-{args.lr}-{args.batch_size}-multitask.pt' # Save path.
     seed_everything(args.seed)  # Fix the seed for reproducibility.
     train_multitask(args)

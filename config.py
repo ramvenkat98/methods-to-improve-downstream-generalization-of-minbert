@@ -158,6 +158,7 @@ class PretrainedConfig(object):
         local_files_only=local_files_only,
         use_auth_token=use_auth_token,
       )
+      print(f"Resolved config file is {resolved_config_file}")
       # Load config dict
       config_dict = cls._dict_from_json_file(resolved_config_file)
 

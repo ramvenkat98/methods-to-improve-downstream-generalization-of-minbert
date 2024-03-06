@@ -140,6 +140,6 @@ tokenizer.save_pretrained(output_dir)
 trainer.train()
 
 print("Save model to:", output_dir)
-model.save_pretrained(output_dir)
+model.save_pretrained(output_dir, safe_serialization=False)
 
 print("Training done")
