@@ -89,27 +89,38 @@ class MultitaskBERT(nn.Module):
         ### TODO
         self.bert_embeddings_cache = {}
         self.config = config
-        # shared weights
-        self.shared_linear_initial = nn.Linear(config.hidden_size, config.shared_linear_initial_size)
-        self.shared_linear_initial_dropout = nn.Dropout(config.hidden_dropout_prob)
-        # self.shared_linear_final = nn.Linear(config.shared_linear_initial_size, config.shared_linear_final_size)
-        # self.shared_linear_final_dropout = nn.Dropout(config.hidden_dropout_prob)
-        # dedicated weights for sentiment
-        self.sentiment_linear = nn.Linear(config.hidden_size, config.sentiment_embedding_size)
-        self.sentiment_dropout = nn.Dropout(config.hidden_dropout_prob)
-        # overarching weights for sentiment
-        self.sentiment_overarch = nn.Linear(config.sentiment_embedding_size + config.shared_linear_final_size, N_SENTIMENT_CLASSES)
-        # dedicated weights for paraphrase
-        self.paraphrase_linear_for_dot = nn.Linear(config.hidden_size, config.paraphrase_embedding_size)
-        self.paraphrase_final_linear = nn.Linear(config.hidden_size * 2 + config.paraphrase_embedding_size, config.paraphrase_embedding_size)
-        self.paraphrase_dropout = nn.Dropout(config.hidden_dropout_prob)
-        # overarching weights for paraphrase
-        self.paraphrase_overarch = nn.Linear(config.paraphrase_embedding_size + config.shared_linear_final_size, 1)
-        # dedicated weights for similarity
-        self.similarity_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
-        self.similarity_dropout = nn.Dropout(config.hidden_dropout_prob)
-        # overarching weights for similarity
-        self.similarity_overarch = nn.Linear(config.similarity_embedding_size + config.shared_linear_final_size, config.similarity_embedding_size)
+        self.disable_complex_arch = config.disable_complex_arch
+        if config.disable_complex_arch:
+            self.sentiment_linear = nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES)
+            self.sentiment_dropout = nn.Dropout(config.hidden_dropout_prob)
+            self.paraphrase_linear_for_dot = nn.Linear(config.hidden_size, config.paraphrase_embedding_size)
+            self.paraphrase_linear_for_dot_dropout = nn.Dropout(config.hidden_dropout_prob)
+            self.paraphrase_final_linear = nn.Linear(config.hidden_size * 2 + config.paraphrase_embedding_size, 1)
+            self.paraphrase_final_dropout = nn.Dropout(config.hidden_dropout_prob)
+            self.similarity_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
+            self.similarity_dropout = nn.Dropout(config.hidden_dropout_prob)
+        else:
+            # shared weights
+            self.shared_linear_initial = nn.Linear(config.hidden_size, config.shared_linear_initial_size)
+            self.shared_linear_initial_dropout = nn.Dropout(config.hidden_dropout_prob)
+            # self.shared_linear_final = nn.Linear(config.shared_linear_initial_size, config.shared_linear_final_size)
+            # self.shared_linear_final_dropout = nn.Dropout(config.hidden_dropout_prob)
+            # dedicated weights for sentiment
+            self.sentiment_linear = nn.Linear(config.hidden_size, config.sentiment_embedding_size)
+            self.sentiment_dropout = nn.Dropout(config.hidden_dropout_prob)
+            # overarching weights for sentiment
+            self.sentiment_overarch = nn.Linear(config.sentiment_embedding_size + config.shared_linear_final_size, N_SENTIMENT_CLASSES)
+            # dedicated weights for paraphrase
+            self.paraphrase_linear_for_dot = nn.Linear(config.hidden_size, config.paraphrase_embedding_size)
+            self.paraphrase_final_linear = nn.Linear(config.hidden_size * 2 + config.paraphrase_embedding_size, config.paraphrase_embedding_size)
+            self.paraphrase_dropout = nn.Dropout(config.hidden_dropout_prob)
+            # overarching weights for paraphrase
+            self.paraphrase_overarch = nn.Linear(config.paraphrase_embedding_size + config.shared_linear_final_size, 1)
+            # dedicated weights for similarity
+            self.similarity_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
+            self.similarity_dropout = nn.Dropout(config.hidden_dropout_prob)
+            # overarching weights for similarity
+            self.similarity_overarch = nn.Linear(config.similarity_embedding_size + config.shared_linear_final_size, config.similarity_embedding_size)
 
     def forward(self, input_ids, attention_mask, sent_ids, identifier):
         'Takes a batch of sentences and produces embeddings for them.'
@@ -119,6 +130,7 @@ class MultitaskBERT(nn.Module):
         # (e.g., by adding other layers).
         ### TODO
         if self.config.option == 'pretrain' and sent_ids is not None:
+            print("Should not enter caching flow now")
             for (i, sent_id) in enumerate(sent_ids):
                 cache_key = (sent_id, identifier)
                 if cache_key not in self.bert_embeddings_cache:
@@ -129,6 +141,9 @@ class MultitaskBERT(nn.Module):
             return self.bert(input_ids, attention_mask)['pooler_output']
     
     def get_shared_arch_output(self, bert_embedding):
+        if self.disable_complex_arch:
+            print("no shared arch when disabling complex arch")
+            raise NotImplementedError
         # return self.shared_linear_final(
         # self.shared_linear_final_dropout(
         return self.shared_linear_initial(
@@ -145,6 +160,13 @@ class MultitaskBERT(nn.Module):
         Thus, your output should contain 5 logits for each sentence.
         '''
         ### TODO
+        if self.disable_complex_arch:
+            bert_embedding = self.forward(input_ids, attention_mask, sent_ids, 'sentiment')    
+            return self.sentiment_linear(
+                self.sentiment_dropout(
+                    bert_embedding
+                )
+            )        
         bert_embedding = self.forward(input_ids, attention_mask, sent_ids, 'sentiment')
         shared_arch_output = self.get_shared_arch_output(bert_embedding)
         dedicated_arch_output = self.sentiment_linear(
@@ -186,6 +208,25 @@ class MultitaskBERT(nn.Module):
         #     input_ids_2, attention_mask_2, sent_ids, 'para_2'
         # )
         # return self.predict_paraphrase_given_embeddings(embedding_1, embedding_2, bert_embedding_1, bert_embedding_2)
+        if self.disable_complex_arch:
+            bert_embedding_1 = self.forward(input_ids_1, attention_mask_1, sent_ids, 'para_1')
+            bert_embedding_2 = self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2')
+            intermediate_output_1 = self.paraphrase_linear_for_dot(
+                self.paraphrase_dropout(
+                    bert_embedding_1
+                )
+            )    
+            intermediate_output_2 = self.paraphrase_linear_for_dot(
+                self.paraphrase_dropout(
+                    bert_embedding_2
+                )
+            )
+            combined_intermediate_output = torch.concat((bert_embedding_1, bert_embedding_2, intermediate_output_1 * intermediate_output_2), dim=1)
+            return self.paraphrase_final_linear(
+                self.paraphrase_final_dropout(
+                    combined_intermediate_output
+                )
+            ).view(-1)
         bert_embedding_1 = self.forward(input_ids_1, attention_mask_1, sent_ids, 'para_1')
         bert_embedding_2 = self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2')
         shared_arch_output_1 = self.get_shared_arch_output(bert_embedding_1)
@@ -212,6 +253,12 @@ class MultitaskBERT(nn.Module):
         return self.paraphrase_overarch(overarch_input).view(-1)
 
     def get_similarity_embedding_given_bert_embedding(self, bert_embedding):
+        if self.disable_complex_arch:
+            return self.similarity_linear(
+                self.similarity_dropout(
+                    bert_embedding
+                )
+            )
         shared_arch_output = self.get_shared_arch_output(bert_embedding)
         dedicated_arch_output = self.similarity_linear(self.similarity_dropout(bert_embedding))
         return torch.cat((shared_arch_output, dedicated_arch_output), dim=1)
@@ -485,6 +532,7 @@ def train_multitask(args):
               'hidden_size': 768,
               'data_dir': '.',
               'load_model_state_dict_from_model_path': args.load_model_state_dict_from_model_path if args.option == 'finetune_after_additional_pretraining' else None,
+              'disable_complex_arch': args.disable_complex_arch,
               'option': args.option}
 
     config = SimpleNamespace(**config)
@@ -720,6 +768,7 @@ def get_args():
     )
     parser.add_argument("--use_even_batching", action='store_true')
     parser.add_argument("--adv_train", action='store_true')
+    parser.add_argument("--disable_complex_arch", action='store_true')
 
     args = parser.parse_args()
     return args
