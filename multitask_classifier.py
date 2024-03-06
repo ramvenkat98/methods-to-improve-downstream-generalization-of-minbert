@@ -473,12 +473,12 @@ def train_multitask(args):
     # Init model.
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
               'num_labels': num_labels,
-              'sentiment_embedding_size': 256,
-              'similarity_embedding_size': 256,
-              'paraphrase_embedding_size': 256,
-              'shared_linear_initial_size': 256,
+              'sentiment_embedding_size': 128,
+              'similarity_embedding_size': 128,
+              'paraphrase_embedding_size': 128,
+              'shared_linear_initial_size': 128,
               # currently we don't use final - must be same dim as initial
-              'shared_linear_final_size': 256,
+              'shared_linear_final_size': 128,
               'hidden_size': 768,
               'data_dir': '.',
               'option': args.option}
