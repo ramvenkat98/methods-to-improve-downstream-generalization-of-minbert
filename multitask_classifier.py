@@ -91,6 +91,7 @@ class MultitaskBERT(nn.Module):
         self.config = config
         self.disable_complex_arch = config.disable_complex_arch
         if config.disable_complex_arch:
+            print("Disabling complex arch")
             self.sentiment_linear = nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES)
             self.sentiment_dropout = nn.Dropout(config.hidden_dropout_prob)
             self.paraphrase_linear_for_dot = nn.Linear(config.hidden_size, config.paraphrase_embedding_size)
@@ -114,6 +115,7 @@ class MultitaskBERT(nn.Module):
             self.paraphrase_linear_for_dot = nn.Linear(config.hidden_size, config.paraphrase_embedding_size)
             self.paraphrase_final_linear = nn.Linear(config.hidden_size * 2 + config.paraphrase_embedding_size, config.paraphrase_embedding_size)
             self.paraphrase_dropout = nn.Dropout(config.hidden_dropout_prob)
+            self.paraphrase_final_dropout = nn.Dropout(config.hidden_dropout_prob)
             # overarching weights for paraphrase
             self.paraphrase_overarch = nn.Linear(config.paraphrase_embedding_size + config.shared_linear_final_size, 1)
             # dedicated weights for similarity
@@ -212,12 +214,12 @@ class MultitaskBERT(nn.Module):
             bert_embedding_1 = self.forward(input_ids_1, attention_mask_1, sent_ids, 'para_1')
             bert_embedding_2 = self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2')
             intermediate_output_1 = self.paraphrase_linear_for_dot(
-                self.paraphrase_dropout(
+                self.paraphrase_linear_for_dot_dropout(
                     bert_embedding_1
                 )
             )    
             intermediate_output_2 = self.paraphrase_linear_for_dot(
-                self.paraphrase_dropout(
+                self.paraphrase_linear_for_dot_dropout(
                     bert_embedding_2
                 )
             )
@@ -242,7 +244,7 @@ class MultitaskBERT(nn.Module):
             )
         )
         dedicated_arch_intermediate = torch.concat((bert_embedding_1, bert_embedding_2, dedicated_arch_output_1 * dedicated_arch_output_2), dim=1)
-        dedicated_arch_output = self.paraphrase_final_linear(dedicated_arch_intermediate)
+        dedicated_arch_output = self.paraphrase_final_linear(self.paraphrase_final_dropout(dedicated_arch_intermediate))
         overarch_input = torch.cat(
             (
                 shared_arch_output_1 * shared_arch_output_2,
