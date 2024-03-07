@@ -102,7 +102,12 @@ class MultitaskBERT(nn.Module):
             self.paraphrase_final_dropout = nn.Dropout(config.hidden_dropout_prob)
             self.similarity_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
             self.similarity_dropout = nn.Dropout(config.hidden_dropout_prob)
+            if config.use_allnli_data:
+                self.allnli_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
+                self.allnli_dropout = nn.Dropout(config.hidden_dropout_prob)
         else:
+            if config.use_allnli_data:
+                raise NotImplementedError
             # shared weights
             self.shared_linear_initial = nn.Linear(config.hidden_size, config.shared_linear_initial_size)
             self.shared_linear_initial_dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -259,6 +264,17 @@ class MultitaskBERT(nn.Module):
         embedding_2 = self.get_similarity_embedding(input_ids_2, attention_mask_2, sent_ids, 'similarity_2')
         return self.predict_similarity_given_embedding(embedding_1, embedding_2)
 
+    def get_allnli_embedding(self, input_id, attention_mask, sent_ids, identifier):
+        bert_embedding = self.forward(input_id, attention_mask, sent_ids, identifier)
+        return self.allnli_linear(self.allnli_dropout(bert_embedding))
+
+    def predict_allnli_given_embedding(self, embedding_1, embedding_2):
+        return F.cosine_similarity(embedding_1, embedding_2)
+    
+    def predict_allnli(self, input_ids_1, attention_mask_1, input_ids_2, attention_mask_2, sent_ids=None):
+        embedding_1 = self.get_allnli_embedding(input_ids_1, attention_mask_1, sent_ids, 'allnli_1')
+        embedding_2 = self.get_allnli_embedding(input_ids_2, attention_mask_2, sent_ids, 'allnli_2')
+        return self.predict_allnli_given_embedding(embedding_1, embedding_2)
 
 
 
@@ -394,6 +410,32 @@ def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, debug=F
     train_loss = loss.item()
     return train_loss
 
+def single_batch_train_allnli(batch, model, optimizer, device, debug=False):
+    b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels, b_sent_ids = (
+        batch['token_ids_1'],
+        batch['attention_mask_1'],
+        batch['token_ids_2'],
+        batch['attention_mask_2'],
+        batch['labels'],
+        batch['sent_ids'],
+    )
+    if debug:
+        print(b_sent_ids[:5], b_labels[:5])
+    b_ids_1 = b_ids_1.to(device)
+    b_mask_1 = b_mask_1.to(device)
+    b_ids_2 = b_ids_2.to(device)
+    b_mask_2 = b_mask_2.to(device)
+    b_labels = b_labels.to(device)
+
+    optimizer.zero_grad()
+    embeddings_1 = model.get_allnli_embedding(b_ids_1, b_mask_1, b_sent_ids, 'similarity_1')
+    embeddings_2 = model.get_allnli_embedding(b_ids_2, b_mask_2, b_sent_ids, 'similarity_2')
+    loss = get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'mean')
+    loss.backward()
+    optimizer.step()
+    train_loss = loss.item()
+    return train_loss
+
 def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, adv_teacher, debug=False):
     train_loss = 0
     num_batches = 0
@@ -412,6 +454,7 @@ def single_epoch_train_all(
         optimizer,
         device,
         adv_teachers,
+        use_allnli_data,
         debug=False,
         exclude_sst = False,
         exclude_para = False,
@@ -421,6 +464,8 @@ def single_epoch_train_all(
     sst_train_loss, num_sst_batches = 0, 0
     para_train_loss, num_para_batches = 0, 0
     sts_train_loss, num_sts_batches = 0, 0
+    if use_allnli_data:
+        allnli_train_loss, num_allnli_batches = 0, 0
     for batch in tqdm(train_dataloader, desc=f'train-all-{epoch}', disable=TQDM_DISABLE):
         if batch['dataset_name'] == 'sentiment' and not exclude_sst:
             sst_train_loss += single_batch_train_sst(batch, model, optimizer, device, adv_teacher_sentiment, debug)
@@ -431,12 +476,23 @@ def single_epoch_train_all(
         elif batch['dataset_name'] == 'similarity' and not exclude_sts:
             sts_train_loss += single_batch_train_sts(batch, model, optimizer, device, adv_teacher_similarity, debug)
             num_sts_batches += 1
+        else:
+            assert(use_allnli_data and batch['dataset_name'] == 'allnli')
+            allnli_train_loss += single_batch_train_allnli(batch, model, optimizer, device, debug)
+            num_allnli_batches += 1
         if debug and num_sst_batches + num_para_batches + num_sts_batches >= 5:
             break
-    def get_loss(loss, num_batches):
-        print(f"Loss of {loss} after {num_batches} batches")
+    def get_loss(loss, num_batches, desc):
+        print(f"Loss of {loss} for {desc} after {num_batches} batches")
         return loss / num_batches if num_batches > 0 else -1
-    return get_loss(sst_train_loss, num_sst_batches), get_loss(para_train_loss, num_para_batches), get_loss(sts_train_loss, num_sts_batches)
+    sst_train_loss = get_loss(sst_train_loss, num_sst_batches),
+    para_train_loss = get_loss(para_train_loss, num_para_batches),
+    sts_train_loss = get_loss(sts_train_loss, num_sts_batches)
+    if use_allnli_data:
+        allnli_train_loss = get_loss(allnli_train_loss, num_allnli_batches)
+        return sst_train_loss, para_train_loss, sts_train_loss, allnli_train_loss
+    else:
+        return sst_train_loss, para_train_loss, sts_train_loss
 
 def train_multitask(args):
     '''Train MultitaskBERT.
@@ -460,6 +516,7 @@ def train_multitask(args):
         sst_train_data, num_labels,para_train_data, sts_train_data = load_multitask_data(args.sst_train,args.para_train,args.sts_train, split ='train')
         sst_dev_data, num_labels,para_dev_data, sts_dev_data = load_multitask_data(args.sst_dev,args.para_dev,args.sts_dev, split ='train')
     if not args.use_even_batching:
+        assert(not args.use_allnli_data)
         sst_train_data = SentenceClassificationDataset(sst_train_data, args)
         sst_train_dataloader = DataLoader(sst_train_data, shuffle=True, batch_size=args.batch_size,
                                         collate_fn=sst_train_data.collate_fn)
@@ -471,9 +528,14 @@ def train_multitask(args):
         sts_train_dataloader = DataLoader(sts_train_data, shuffle=True, batch_size=args.batch_size,
                                         collate_fn=para_train_data.collate_fn)
     else:
-        train_data = SentenceAllDataset([sst_train_data, para_train_data, sts_train_data], args)
+        all_train_datasets = [sst_train_data, para_train_data, sts_train_data]
+        all_dev_datasets = [sst_dev_data, para_dev_data, sts_dev_data]
+        if args.use_allnli_data:
+            all_train_datasets.append(allnli_train_data)
+            all_dev_datasets.append(allnli_dev_data)
+        train_data = SentenceAllDataset(all_train_datasets, args)
         train_batch_sampler = BatchSamplerAllDataset(train_data.datasets, args.batch_size, shuffle = True)
-        dev_data = SentenceAllDataset([sst_dev_data, para_dev_data, sts_dev_data], args)
+        dev_data = SentenceAllDataset(all_dev_datasets, args)
         dev_batch_sampler = BatchSamplerAllDataset(dev_data.datasets, args.batch_size, shuffle = False)
         train_dataloader = DataLoader(train_data, collate_fn = train_data.collate_fn, batch_sampler = train_batch_sampler)
         dev_dataloader = DataLoader(dev_data, collate_fn = dev_data.collate_fn, batch_sampler = dev_batch_sampler)
@@ -509,6 +571,7 @@ def train_multitask(args):
               'data_dir': '.',
               'load_model_state_dict_from_model_path': args.load_model_state_dict_from_model_path if args.option == 'finetune_after_additional_pretraining' else None,
               'disable_complex_arch': args.disable_complex_arch,
+              'use_allnli_data': args.use_allnli_data,
               'option': args.option}
 
     config = SimpleNamespace(**config)
@@ -543,6 +606,7 @@ def train_multitask(args):
     for epoch in range(args.epochs):
         model.train()
         if not args.use_even_batching:
+            assert(not args.use_allnli_data)
             if exclude_sts:
                 sts_train_loss = -1
             else:
@@ -563,6 +627,7 @@ def train_multitask(args):
                 optimizer,
                 device,
                 (adv_teacher_similarity, adv_teacher_paraphrase, adv_teacher_sentiment),
+                args.use_allnli_data,
                 debug = debug,
                 exclude_sst = exclude_sst,
                 exclude_para = exclude_para,

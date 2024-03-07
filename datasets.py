@@ -25,7 +25,8 @@ class DatasetInfo(NamedTuple):
 DATASET_INFOS = {
     'similarity': DatasetInfo('similarity', True, True),
     'paraphrase': DatasetInfo('paraphrase', True, False),
-    'sentiment': DatasetInfo('sentiment', False, False)
+    'sentiment': DatasetInfo('sentiment', False, False),
+    'allnli': DatasetInfo('allnli', True, False)
 }
 
 def preprocess_string(s):
@@ -354,11 +355,12 @@ def load_multitask_data(sentiment_filename,paraphrase_filename,similarity_filena
         allnli_data = []
         # Open the file and read line by line
         with open(allnli_filename, 'r') as file:
-            for line in file:
+            for (i, line) in enumerate(file, start = 1):
                 # Convert the line from a string representation of a list to a list
                 data_list = ast.literal_eval(line)
                 # Convert the list to a tuple and append to our list of tuples
-                allnli_data.append(tuple(data_list))
+                # TODO: currently treating allnli purely as a paired dataset, we could use the triples
+                allnli_data.append((data_list[0], data_list[1], data_list[2], None, i))
         random.shuffle(allnli_data)
         assert(len(allnli_data) > 35000)
         if allnli_split == 'train':
