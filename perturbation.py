@@ -79,22 +79,32 @@ class SmartPerturbation:
         dataset_name,
     ):
         # adv training
-        if dataset_name != 'similarity':
+        if dataset_name not in ('similarity', 'sentiment'):
             raise NotImplementedError
         # init delta
-        input_embed_1 = model.bert.embed(input_ids_1)
-        input_embed_2 = model.bert.embed(input_ids_2)
-        noise_1 = generate_noise(input_embed_1, attention_mask_1, epsilon=self.noise_var)
-        noise_2 = generate_noise(input_embed_2, attention_mask_2, epsilon=self.noise_var)
-        noise = torch.cat([noise_1, noise_2], dim=1)
+        if dataset_name == "similarity":
+            input_embed_1 = model.bert.embed(input_ids_1)
+            input_embed_2 = model.bert.embed(input_ids_2)
+            noise_1 = generate_noise(input_embed_1, attention_mask_1, epsilon=self.noise_var)
+            noise_2 = generate_noise(input_embed_2, attention_mask_2, epsilon=self.noise_var)
+            noise = torch.cat([noise_1, noise_2], dim=1)
+        else:
+            input_embed_1 = model.bert.embed(input_ids_1)
+            noise = generate_noise(input_embed_1, attention_mask_1, epsilon=self.noise_var)
         for step in range(0, self.K):
-            noise_1, noise_2 = torch.split(noise, [input_embed_1.size(1), input_embed_2.size(1)], dim=1)
-            adv_logits = model.predict_similarity_given_bert_input_embeds(
-                input_embed_1 + noise_1,
-                attention_mask_1,
-                input_embed_2 + noise_2,
-                attention_mask_2,
-            )
+            if dataset_name == "similarity":
+                noise_1, noise_2 = torch.split(noise, [input_embed_1.size(1), input_embed_2.size(1)], dim=1)
+                adv_logits = model.predict_similarity_given_bert_input_embeds(
+                    input_embed_1 + noise_1,
+                    attention_mask_1,
+                    input_embed_2 + noise_2,
+                    attention_mask_2,
+                )
+            else:
+                adv_logits = model.predict_sentiment_given_bert_input_embeds(
+                    input_embed_1 + noise,
+                    attention_mask_1,
+                )
             adv_loss = F.mse_loss(adv_logits, logits.detach(), reduction="sum")
             (delta_grad,) = torch.autograd.grad(
                 adv_loss, noise, only_inputs=True, retain_graph=False
@@ -109,11 +119,17 @@ class SmartPerturbation:
             )
             noise = noise.detach()
             noise.requires_grad_()
-        adv_logits = model.predict_similarity_given_bert_input_embeds(
-            input_embed_1 + noise_1,
-            attention_mask_1,
-            input_embed_2 + noise_2,
-            attention_mask_2,
-        )
+        if dataset_name == "similarity":
+            adv_logits = model.predict_similarity_given_bert_input_embeds(
+                input_embed_1 + noise_1,
+                attention_mask_1,
+                input_embed_2 + noise_2,
+                attention_mask_2,
+            )
+        else:
+            adv_logits = model.predict_sentiment_given_bert_input_embeds(
+                input_embed_1 + noise,
+                attention_mask_1,
+            )
         adv_loss = F.mse_loss(logits, adv_logits, reduction="mean")
         return adv_loss

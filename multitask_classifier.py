@@ -157,6 +157,19 @@ class MultitaskBERT(nn.Module):
         # self.shared_linear_final_dropout(
         return self.shared_linear_initial(bert_embedding)
 
+    def predict_sentiment_given_bert_embedding(self, bert_embedding):
+        bert_embedding = self.sentiment_dropout(bert_embedding)
+        if self.disable_complex_arch:
+            return self.sentiment_linear(bert_embedding)
+        shared_arch_output = self.get_shared_arch_output(bert_embedding)
+        dedicated_arch_output = self.sentiment_linear(bert_embedding)
+        return self.sentiment_overarch(
+            torch.cat((shared_arch_output, dedicated_arch_output), dim=1)
+        )
+
+    def predict_sentiment_given_bert_input_embeds(self, input_embed, attention_mask):
+        bert_embedding = self.bert.forward_given_input_embeds(input_embed, attention_mask)['pooler_output']
+        return self.predict_sentiment_given_bert_embedding(bert_embedding)
 
     def predict_sentiment(self, input_ids, attention_mask, sent_ids=None):
         '''Given a batch of sentences, outputs logits for classifying sentiment.
@@ -165,19 +178,8 @@ class MultitaskBERT(nn.Module):
         Thus, your output should contain 5 logits for each sentence.
         '''
         ### TODO
-        if self.disable_complex_arch:
-            bert_embedding = self.forward(input_ids, attention_mask, sent_ids, 'sentiment')    
-            return self.sentiment_linear(
-                self.sentiment_dropout(
-                    bert_embedding
-                )
-            )        
-        bert_embedding = self.sentiment_dropout(self.forward(input_ids, attention_mask, sent_ids, 'sentiment'))
-        shared_arch_output = self.get_shared_arch_output(bert_embedding)
-        dedicated_arch_output = self.sentiment_linear(bert_embedding)
-        return self.sentiment_overarch(
-            torch.cat((shared_arch_output, dedicated_arch_output), dim=1)
-        )
+        bert_embedding = self.forward(input_ids, attention_mask, sent_ids, 'sentiment')
+        return self.predict_sentiment_given_bert_embedding(bert_embedding)
 
     # TODO address these functions when we re-enable complex arch
     def get_paraphrase_embedding_and_bert_embedding(self, input_id, attention_mask, sent_ids, identifier):
@@ -588,7 +590,7 @@ def train_multitask(args):
     
     lr = args.lr
     print("Learning rate of", lr, "for", args.epochs, "epochs")
-    optimizer = AdamW(model.parameters(), lr=lr)
+    optimizer = AdamW(model.parameters(), weight_decay=args.weight_decay, lr=lr)
     best_dev_acc = 0
     adv_teacher_similarity = None
     adv_teacher_paraphrase = None
@@ -802,6 +804,7 @@ def get_args():
     parser.add_argument("--batch_size", help='sst: 64, cfimdb: 8 can fit a 12GB GPU', type=int, default=8)
     parser.add_argument("--hidden_dropout_prob", type=float, default=0.3)
     parser.add_argument("--lr", type=float, help="learning rate", default=1e-5)
+    parser.add_argument("--weight_decay", type=float, help="weight decay", default=0.0)
     parser.add_argument(
         "--load_model_state_dict_from_model_path",
         type=str,
