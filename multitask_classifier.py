@@ -453,7 +453,7 @@ def train_multitask(args):
     elif args.use_gpu and torch.backends.mps.is_available():
         device = torch.device('mps')
     # Create the data and its corresponding datasets and dataloader.
-    if args.use_nli_data:
+    if args.use_allnli_data:
         sst_train_data, num_labels,para_train_data, sts_train_data, allnli_train_data = load_multitask_data(args.sst_train,args.para_train,args.sts_train, split ='train', allnli_filename=ALLNLI_FILENAME, allnli_split='train')
         sst_dev_data, num_labels,para_dev_data, sts_dev_data, allnli_dev_data = load_multitask_data(args.sst_dev,args.para_dev,args.sts_dev, split ='train', allnli_filename=ALLNLI_FILENAME, allnli_split='dev')
     else:
