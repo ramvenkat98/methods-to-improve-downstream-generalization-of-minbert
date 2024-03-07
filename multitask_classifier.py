@@ -325,12 +325,12 @@ def single_batch_train_para(batch, model, optimizer, device, adv_teacher, debug=
     b_labels = b_labels.to(device)
 
     optimizer.zero_grad()
-    # logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
-    embeddings_1, bert_embeddings_1 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_1, b_mask_1, b_sent_ids, 'para_1')
-    embeddings_2, bert_embeddings_2 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_2, b_mask_2, b_sent_ids, 'para_2')
-    logits = model.predict_paraphrase_given_embeddings(embeddings_1, embeddings_2, bert_embeddings_1, bert_embeddings_2)
-    multi_negatives_ranking_loss = get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'none')
-    multi_negatives_ranking_loss = torch.sum((b_labels == 1) * multi_negatives_ranking_loss) / torch.sum(b_labels == 1)
+    logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
+    # embeddings_1, bert_embeddings_1 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_1, b_mask_1, b_sent_ids, 'para_1')
+    # embeddings_2, bert_embeddings_2 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_2, b_mask_2, b_sent_ids, 'para_2')
+    # logits = model.predict_paraphrase_given_embeddings(embeddings_1, embeddings_2, bert_embeddings_1, bert_embeddings_2)
+    multi_negatives_ranking_loss = 0 # get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'none')
+    # multi_negatives_ranking_loss = torch.sum((b_labels == 1) * multi_negatives_ranking_loss) / torch.sum(b_labels == 1)
     loss = F.binary_cross_entropy_with_logits(logits, b_labels.view(-1).float(), reduction='sum') / args.batch_size
     if debug:
         print("para", logits[:5], b_labels[:5])
@@ -379,8 +379,8 @@ def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, debug=F
     multi_negatives_ranking_loss = get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'none')
     # We should weight the multi-negatives-ranking-loss by the similarity of the texts.
     # Try soft-weighting based on the similarity of the texts.
-    C = sum(np.exp(np.arange(1, 5)))
-    multi_negatives_ranking_loss = torch.sum((b_labels >= 3) * torch.exp(b_labels) / C * multi_negatives_ranking_loss) / torch.sum((b_labels >= 3))
+    C = sum(np.exp(np.arange(1, 5))) # TODO fix bug here
+    multi_negatives_ranking_loss = torch.sum((b_labels >= 1) * torch.exp(b_labels) / C * multi_negatives_ranking_loss) / torch.sum((b_labels >= 1))
     loss = F.mse_loss(predictions, b_labels.view(-1).float(), reduction='sum') / args.batch_size
     adv_loss = 0
     if adv_teacher is not None:
