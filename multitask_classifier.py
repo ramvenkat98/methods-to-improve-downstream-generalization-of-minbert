@@ -56,6 +56,8 @@ def seed_everything(seed=11711):
 BERT_HIDDEN_SIZE = 768
 N_SENTIMENT_CLASSES = 5
 
+ALLNLI_FILENAME = 'data/AllNLI.jsonl'
+
 def get_multi_negatives_ranking_loss(a, b, reduction='mean'):
     # Here, I'm following the implementation of MultiNegativesRankingLoss from the sentence_transformers library
     # for the case of cosine similarity specifically.
@@ -148,11 +150,7 @@ class MultitaskBERT(nn.Module):
             raise NotImplementedError
         # return self.shared_linear_final(
         # self.shared_linear_final_dropout(
-        return self.shared_linear_initial(
-            self.shared_linear_initial_dropout(
-                bert_embedding
-            )
-        )
+        return self.shared_linear_initial(bert_embedding)
 
 
     def predict_sentiment(self, input_ids, attention_mask, sent_ids=None):
@@ -169,30 +167,27 @@ class MultitaskBERT(nn.Module):
                     bert_embedding
                 )
             )        
-        bert_embedding = self.forward(input_ids, attention_mask, sent_ids, 'sentiment')
+        bert_embedding = self.sentiment_dropout(self.forward(input_ids, attention_mask, sent_ids, 'sentiment'))
         shared_arch_output = self.get_shared_arch_output(bert_embedding)
-        dedicated_arch_output = self.sentiment_linear(
-            self.sentiment_dropout(
-                bert_embedding
-            )
-        )
+        dedicated_arch_output = self.sentiment_linear(bert_embedding)
         return self.sentiment_overarch(
             torch.cat((shared_arch_output, dedicated_arch_output), dim=1)
         )
 
-    # TODO address these functions when we re-try multiple negatives loss
-    # def get_paraphrase_embedding_and_bert_embedding(self, input_id, attention_mask, sent_ids, identifier):
-    #     bert_embedding = self.forward(input_id, attention_mask, sent_ids, identifier)
-    #     embedding = self.paraphrase_linear_for_dot(
-    #         self.paraphrase_dropout(
-    #             bert_embedding
-    #         )
-    #     )
-    #     return embedding, bert_embedding
+    # TODO address these functions when we re-enable complex arch
+    def get_paraphrase_embedding_and_bert_embedding(self, input_id, attention_mask, sent_ids, identifier):
+        if self.disable_complex_arch:
+            bert_embedding = self.paraphrase_linear_for_dot_dropout(self.forward(input_id, attention_mask, sent_ids, identifier))
+            embedding = self.paraphrase_linear_for_dot(bert_embedding)
+            return embedding, bert_embedding
+        else:
+            raise NotImplementedError
 
-    # def predict_paraphrase_given_embeddings(self, embedding_1, embedding_2, bert_embedding_1, bert_embedding_2):
-    #     intermediate = torch.concat((bert_embedding_1, bert_embedding_2, embedding_1 * embedding_2), dim=1)
-    #     return self.paraphrase_final_linear(intermediate).view(-1)
+    def predict_paraphrase_given_embeddings(self, embedding_1, embedding_2, bert_embedding_1, bert_embedding_2):
+        combined_intermediate_output = torch.concat((bert_embedding_1, bert_embedding_2, embedding_1 * embedding_2), dim=1)
+        return self.paraphrase_final_linear(
+            self.paraphrase_final_dropout(combined_intermediate_output)
+        ).view(-1)
 
     def predict_paraphrase(self,
                            input_ids_1, attention_mask_1,
@@ -211,16 +206,9 @@ class MultitaskBERT(nn.Module):
         # )
         # return self.predict_paraphrase_given_embeddings(embedding_1, embedding_2, bert_embedding_1, bert_embedding_2)
         if self.disable_complex_arch:
-            bert_embedding_1 = self.paraphrase_linear_for_dot_dropout(self.forward(input_ids_1, attention_mask_1, sent_ids, 'para_1'))
-            bert_embedding_2 = self.paraphrase_linear_for_dot_dropout(self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2'))
-            intermediate_output_1 = self.paraphrase_linear_for_dot(bert_embedding_1)    
-            intermediate_output_2 = self.paraphrase_linear_for_dot(bert_embedding_2)
-            combined_intermediate_output = torch.concat((bert_embedding_1, bert_embedding_2, intermediate_output_1 * intermediate_output_2), dim=1)
-            return self.paraphrase_final_linear(
-                self.paraphrase_final_dropout(
-                    combined_intermediate_output
-                )
-            ).view(-1)
+            intermediate_output_1, bert_embedding_1 = self.get_paraphrase_embedding_and_bert_embedding(input_ids_1, attention_mask_1, sent_ids, 'para_1')
+            intermediate_output_2, bert_embedding_2 = self.get_paraphrase_embedding_and_bert_embedding(input_ids_2, attention_mask_2, sent_ids, 'para_2')
+            return self.predict_paraphrase_given_embeddings(intermediate_output_1, intermediate_output_2, bert_embedding_1, bert_embedding_2)
         bert_embedding_1 = self.paraphrase_dropout(self.forward(input_ids_1, attention_mask_1, sent_ids, 'para_1'))
         bert_embedding_2 = self.paraphrase_dropout(self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2'))
         shared_arch_output_1 = self.get_shared_arch_output(bert_embedding_1)
@@ -239,14 +227,11 @@ class MultitaskBERT(nn.Module):
         return self.paraphrase_overarch(overarch_input).view(-1)
 
     def get_similarity_embedding_given_bert_embedding(self, bert_embedding):
+        bert_embedding = self.similarity_dropout(bert_embedding)
         if self.disable_complex_arch:
-            return self.similarity_linear(
-                self.similarity_dropout(
-                    bert_embedding
-                )
-            )
+            return self.similarity_linear(bert_embedding)
         shared_arch_output = self.get_shared_arch_output(bert_embedding)
-        dedicated_arch_output = self.similarity_linear(self.similarity_dropout(bert_embedding))
+        dedicated_arch_output = self.similarity_linear(bert_embedding)
         return torch.cat((shared_arch_output, dedicated_arch_output), dim=1)
     
     def get_similarity_embedding(self, input_id, attention_mask, sent_ids, identifier):
@@ -340,17 +325,18 @@ def single_batch_train_para(batch, model, optimizer, device, adv_teacher, debug=
     b_labels = b_labels.to(device)
 
     optimizer.zero_grad()
-    logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
-    # embeddings_1, bert_embeddings_1 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_1, b_mask_1, b_sent_ids, 'para_1')
-    # embeddings_2, bert_embeddings_2 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_2, b_mask_2, b_sent_ids, 'para_2')
-    # logits = model.predict_paraphrase_given_embeddings(embeddings_1, embeddings_2, bert_embeddings_1, bert_embeddings_2)
-    multi_negatives_ranking_loss = 0 # get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'mean')
+    # logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
+    embeddings_1, bert_embeddings_1 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_1, b_mask_1, b_sent_ids, 'para_1')
+    embeddings_2, bert_embeddings_2 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_2, b_mask_2, b_sent_ids, 'para_2')
+    logits = model.predict_paraphrase_given_embeddings(embeddings_1, embeddings_2, bert_embeddings_1, bert_embeddings_2)
+    multi_negatives_ranking_loss = get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'none')
+    multi_negatives_ranking_loss = torch.sum((b_labels == 1) * multi_negatives_ranking_loss) / torch.sum(b_labels == 1)
     loss = F.binary_cross_entropy_with_logits(logits, b_labels.view(-1).float(), reduction='sum') / args.batch_size
     if debug:
         print("para", logits[:5], b_labels[:5])
         print("para loss", loss, "multi negatives ranking loss", multi_negatives_ranking_loss)
         printed += 1
-    # loss = 0.85 * loss + 0.15 * multi_negatives_ranking_loss
+    loss = loss + 0.5 * multi_negatives_ranking_loss
     loss.backward()
     optimizer.step()
     train_loss = loss.item()
@@ -386,7 +372,7 @@ def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, debug=F
     b_labels = b_labels.to(device)
 
     optimizer.zero_grad()
-    predictions = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
+    # predictions = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
     embeddings_1 = model.get_similarity_embedding(b_ids_1, b_mask_1, b_sent_ids, 'similarity_1')
     embeddings_2 = model.get_similarity_embedding(b_ids_2, b_mask_2, b_sent_ids, 'similarity_2')
     predictions = model.predict_similarity_given_embedding(embeddings_1, embeddings_2)
@@ -394,7 +380,7 @@ def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, debug=F
     # We should weight the multi-negatives-ranking-loss by the similarity of the texts.
     # Try soft-weighting based on the similarity of the texts.
     C = sum(np.exp(np.arange(1, 5)))
-    multi_negatives_ranking_loss = torch.sum((b_labels >= 1) * torch.exp(b_labels) / C * multi_negatives_ranking_loss) / args.batch_size
+    multi_negatives_ranking_loss = torch.sum((b_labels >= 3) * torch.exp(b_labels) / C * multi_negatives_ranking_loss) / torch.sum((b_labels >= 3))
     loss = F.mse_loss(predictions, b_labels.view(-1).float(), reduction='sum') / args.batch_size
     adv_loss = 0
     if adv_teacher is not None:
@@ -467,8 +453,12 @@ def train_multitask(args):
     elif args.use_gpu and torch.backends.mps.is_available():
         device = torch.device('mps')
     # Create the data and its corresponding datasets and dataloader.
-    sst_train_data, num_labels,para_train_data, sts_train_data = load_multitask_data(args.sst_train,args.para_train,args.sts_train, split ='train')
-    sst_dev_data, num_labels,para_dev_data, sts_dev_data = load_multitask_data(args.sst_dev,args.para_dev,args.sts_dev, split ='train')
+    if args.use_nli_data:
+        sst_train_data, num_labels,para_train_data, sts_train_data, allnli_train_data = load_multitask_data(args.sst_train,args.para_train,args.sts_train, split ='train', allnli_filename=ALLNLI_FILENAME, allnli_split='train')
+        sst_dev_data, num_labels,para_dev_data, sts_dev_data, allnli_dev_data = load_multitask_data(args.sst_dev,args.para_dev,args.sts_dev, split ='train', allnli_filename=ALLNLI_FILENAME, allnli_split='dev')
+    else:
+        sst_train_data, num_labels,para_train_data, sts_train_data = load_multitask_data(args.sst_train,args.para_train,args.sts_train, split ='train')
+        sst_dev_data, num_labels,para_dev_data, sts_dev_data = load_multitask_data(args.sst_dev,args.para_dev,args.sts_dev, split ='train')
     if not args.use_even_batching:
         sst_train_data = SentenceClassificationDataset(sst_train_data, args)
         sst_train_dataloader = DataLoader(sst_train_data, shuffle=True, batch_size=args.batch_size,
@@ -755,7 +745,7 @@ def get_args():
     parser.add_argument("--use_even_batching", action='store_true')
     parser.add_argument("--adv_train", action='store_true')
     parser.add_argument("--disable_complex_arch", action='store_true')
-
+    parser.add_argument("--use_allnli_data", action='store_true')
     args = parser.parse_args()
     return args
 

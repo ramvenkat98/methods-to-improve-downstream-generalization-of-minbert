@@ -15,6 +15,7 @@ import torch
 from torch.utils.data import Dataset, BatchSampler, RandomSampler, SequentialSampler
 from tokenizer import BertTokenizer
 from typing import Any, List, NamedTuple
+import ast
 
 class DatasetInfo(NamedTuple):
     datasetName: str
@@ -287,7 +288,7 @@ class BatchSamplerAllDataset(BatchSampler):
         return sum(len(batch_sampler) for batch_sampler in self.batch_samplers)
         
 
-def load_multitask_data(sentiment_filename,paraphrase_filename,similarity_filename,split='train'):
+def load_multitask_data(sentiment_filename,paraphrase_filename,similarity_filename,split='train', allnli_filename=None, allnli_split=None):
     sentiment_data = []
     num_labels = {}
     if split == 'test':
@@ -348,4 +349,25 @@ def load_multitask_data(sentiment_filename,paraphrase_filename,similarity_filena
 
     print(f"Loaded {len(similarity_data)} {split} examples from {similarity_filename}")
 
-    return sentiment_data, num_labels, paraphrase_data, similarity_data
+    if allnli_filename is not None:
+        assert(allnli_split is not None)
+        allnli_data = []
+        # Open the file and read line by line
+        with open(allnli_filename, 'r') as file:
+            for line in file:
+                # Convert the line from a string representation of a list to a list
+                data_list = ast.literal_eval(line)
+                # Convert the list to a tuple and append to our list of tuples
+                allnli_data.append(tuple(data_list))
+        random.shuffle(allnli_data)
+        assert(len(allnli_data) > 35000)
+        if allnli_split == 'train':
+            allnli_data = allnli_data[:30000]
+        else:
+            allnli_data = allnli_data[30000:35000]
+        print(f"Loaded {len(allnli_data)} {split} examples from {allnli_filename}")
+
+    if allnli_filename is not None:
+        return sentiment_data, num_labels, paraphrase_data, similarity_data, allnli_data
+    else:
+        return sentiment_data, num_labels, paraphrase_data, similarity_data
