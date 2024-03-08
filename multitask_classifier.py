@@ -403,7 +403,7 @@ def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, enable_
     if enable_unsupervised_simcse:
         embeddings_1_copy_with_diff_dropout = model.get_similarity_embedding(b_ids_1, b_mask_1, b_sent_ids, 'similarity_1')
         embeddings_2_copy_with_diff_dropout = model.get_similarity_embedding(b_ids_2, b_mask_2, b_sent_ids, 'similarity_2')
-        unsupervised_simcse_mask = torch.randint(0, 2, (embeddings_1.shape[0], 1)).bool()
+        unsupervised_simcse_mask = torch.randint(0, 2, (embeddings_1.shape[0], 1)).bool().to(device)
         embeddings_for_unsupervised_simcse = torch.where(unsupervised_simcse_mask, embeddings_1, embeddings_2)
         embeddings_for_unsupervised_simcse_copy = torch.where(unsupervised_simcse_mask, embeddings_1_copy_with_diff_dropout, embeddings_2_copy_with_diff_dropout)
         if debug:
