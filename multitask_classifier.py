@@ -616,7 +616,7 @@ def train_multitask(args):
         swa_model = swa_utils.AveragedModel(model)
         swa_start = args.epochs * 0.75
         scheduler = LinearLR(optimizer, start_factor = 1.0, end_factor = 0.2, total_iters = swa_start)
-        swa_scheduler = swa_utils.SWALR(optimizer, swa_lr = lr, anneal_epochs = int(0.1 * args.epochs))
+        swa_scheduler = swa_utils.SWALR(optimizer, swa_lr = 5 * lr, anneal_epochs = int(0.1 * args.epochs))
 
     best_dev_acc = 0
     adv_teacher_similarity = None
