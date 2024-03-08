@@ -450,7 +450,7 @@ def single_batch_train_allnli(batch, model, optimizer, device, debug=False):
     optimizer.zero_grad()
     embeddings_1 = model.get_allnli_embedding(b_ids_1, b_mask_1, b_sent_ids, 'allnli_1')
     embeddings_2 = model.get_allnli_embedding(b_ids_2, b_mask_2, b_sent_ids, 'allnli_2')
-    loss = get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'mean')
+    loss = 0.5 * get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'mean')
     loss.backward()
     optimizer.step()
     train_loss = loss.item()

@@ -363,11 +363,11 @@ def load_multitask_data(sentiment_filename,paraphrase_filename,similarity_filena
                 # Note: We don't use the label (1 by default).
                 allnli_data.append((data_list[0], data_list[1], 1, i, 'allnli'))
         random.shuffle(allnli_data)
-        assert(len(allnli_data) > 110000)
+        assert(len(allnli_data) > 55000)
         if allnli_split == 'train':
-            allnli_data = allnli_data[:100000]
+            allnli_data = allnli_data[:50000]
         else:
-            allnli_data = allnli_data[100000:110000]
+            allnli_data = allnli_data[50000:55000]
         print(f"Loaded {len(allnli_data)} {split} examples from {allnli_filename}")
 
     if allnli_filename is not None:
