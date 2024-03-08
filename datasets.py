@@ -360,13 +360,14 @@ def load_multitask_data(sentiment_filename,paraphrase_filename,similarity_filena
                 data_list = ast.literal_eval(line)
                 # Convert the list to a tuple and append to our list of tuples
                 # TODO: currently treating allnli purely as a paired dataset, we could use the triples
-                allnli_data.append((data_list[0], data_list[1], data_list[2], None, i))
+                # Note: We don't use the label (1 by default).
+                allnli_data.append((data_list[0], data_list[1], 1, i, 'allnli'))
         random.shuffle(allnli_data)
-        assert(len(allnli_data) > 35000)
+        assert(len(allnli_data) > 110000)
         if allnli_split == 'train':
-            allnli_data = allnli_data[:30000]
+            allnli_data = allnli_data[:100000]
         else:
-            allnli_data = allnli_data[30000:35000]
+            allnli_data = allnli_data[100000:110000]
         print(f"Loaded {len(allnli_data)} {split} examples from {allnli_filename}")
 
     if allnli_filename is not None:
