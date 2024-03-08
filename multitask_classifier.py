@@ -70,6 +70,13 @@ def get_multi_negatives_ranking_loss(a, b, reduction='mean'):
     similarity_matrix = torch.mm(a, b.transpose(0, 1))
     return F.cross_entropy(similarity_matrix, torch.arange(similarity_matrix.shape[0], device = a.device), reduction=reduction)
 
+def get_unsupervised_simcse_loss(a, b):
+    # In the paper, they use cosine similarity after tuning instead of a dot product (https://arxiv.org/pdf/2104.08821.pdf).
+    # We use the dot product because it seems like it will do better out-of-the-box if we don't tune, since the range of
+    # accuracies obtained at different amounts of tuning varies quite a bit.
+    similarity_matrix = torch.mm(a, b.transpose(0, 1))
+    return F.cross_entropy(similarity_matrix, torch.arange(similarity_matrix.shape[0], device = a.device), reduction='mean')
+
 class MultitaskBERT(nn.Module):
     '''
     This module should use BERT for 3 tasks:
@@ -372,7 +379,7 @@ def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, devi
     train_loss = train_loss / num_batches
     return train_loss
 
-def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, debug=False):
+def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, enable_unsupervised_simcse, debug=False):
     b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels, b_sent_ids = (
         batch['token_ids_1'],
         batch['attention_mask_1'],
@@ -393,6 +400,16 @@ def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, debug=F
     # predictions = model.predict_similarity(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
     embeddings_1 = model.get_similarity_embedding(b_ids_1, b_mask_1, b_sent_ids, 'similarity_1')
     embeddings_2 = model.get_similarity_embedding(b_ids_2, b_mask_2, b_sent_ids, 'similarity_2')
+    if enable_unsupervised_simcse:
+        embeddings_1_copy_with_diff_dropout = model.get_similarity_embedding(b_ids_1, b_mask_1, b_sent_ids, 'similarity_1')
+        embeddings_2_copy_with_diff_dropout = model.get_similarity_embedding(b_ids_2, b_mask_2, b_sent_ids, 'similarity_2')
+        unsupervised_simcse_mask = torch.randint(0, 2, (embeddings_1.shape[0], 1)).bool()
+        embeddings_for_unsupervised_simcse = torch.where(unsupervised_simcse_mask, embeddings_1, embeddings_2)
+        embeddings_for_unsupervised_simcse_copy = torch.where(unsupervised_simcse_mask, embeddings_1_copy_with_diff_dropout, embeddings_2_copy_with_diff_dropout)
+        if debug:
+            assert(not (torch.all(embeddings_for_unsupervised_simcse == embeddings_for_unsupervised_simcse_copy)))
+        unsupervised_simcse_loss = get_unsupervised_simcse_loss(embeddings_for_unsupervised_simcse, embeddings_for_unsupervised_simcse_copy)
+
     predictions = model.predict_similarity_given_embedding(embeddings_1, embeddings_2)
     multi_negatives_ranking_loss = get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'none')
     # We should weight the multi-negatives-ranking-loss by the similarity of the texts.
@@ -406,6 +423,8 @@ def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, debug=F
     if debug:
         print("sts", predictions[:5], b_labels[:5], loss, multi_negatives_ranking_loss)
     loss = loss + 10 * multi_negatives_ranking_loss + 50 * adv_loss
+    if enable_unsupervised_simcse:
+        loss = loss + 10 * unsupervised_simcse_loss
     loss.backward()
     optimizer.step()
     train_loss = loss.item()
@@ -437,11 +456,11 @@ def single_batch_train_allnli(batch, model, optimizer, device, debug=False):
     train_loss = loss.item()
     return train_loss
 
-def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, adv_teacher, debug=False):
+def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, adv_teacher, enable_unsupervised_simcse, debug=False):
     train_loss = 0
     num_batches = 0
     for batch in tqdm(sts_train_dataloader, desc=f'train-sts-{epoch}', disable=TQDM_DISABLE):
-        train_loss += single_batch_train_sts(batch, model, optimizer, device, adv_teacher, debug)
+        train_loss += single_batch_train_sts(batch, model, optimizer, device, adv_teacher, enable_unsupervised_simcse, debug)
         num_batches += 1
         if debug and num_batches >= 5:
             break
@@ -455,6 +474,7 @@ def single_epoch_train_all(
         optimizer,
         device,
         adv_teachers,
+        enable_unsupervised_simcse,
         use_allnli_data,
         grad_scaling_factor_for_para,
         debug=False,
@@ -476,10 +496,9 @@ def single_epoch_train_all(
             para_train_loss += single_batch_train_para(batch, model, optimizer, device, adv_teacher_paraphrase, grad_scaling_factor_for_para, debug)
             num_para_batches += 1
         elif batch['dataset_name'] == 'similarity' and not exclude_sts:
-            sts_train_loss += single_batch_train_sts(batch, model, optimizer, device, adv_teacher_similarity, debug)
+            sts_train_loss += single_batch_train_sts(batch, model, optimizer, device, adv_teacher_similarity, enable_unsupervised_simcse, debug)
             num_sts_batches += 1
-        else:
-            assert(use_allnli_data and batch['dataset_name'] == 'allnli')
+        elif batch['dataset_name'] == 'allnli' and use_allnli_data:
             allnli_train_loss += single_batch_train_allnli(batch, model, optimizer, device, debug)
             num_allnli_batches += 1
         if debug and num_sst_batches + num_para_batches + num_sts_batches >= 5:
@@ -620,7 +639,7 @@ def train_multitask(args):
             if exclude_sts:
                 sts_train_loss = -1
             else:
-                sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, adv_teacher_similarity, debug = debug)
+                sts_train_loss = single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device, adv_teacher_similarity, args.enable_unsupervised_simcse, debug = debug)
             if exclude_para:
                 para_train_loss = -1
             else:
@@ -637,6 +656,7 @@ def train_multitask(args):
                 optimizer,
                 device,
                 (adv_teacher_similarity, adv_teacher_paraphrase, adv_teacher_sentiment),
+                args.enable_unsupervised_simcse,
                 args.use_allnli_data,
                 args.grad_scaling_factor_for_para,
                 debug = debug,
@@ -842,6 +862,7 @@ def get_args():
     parser.add_argument("--adv_train", action='store_true')
     parser.add_argument("--disable_complex_arch", action='store_true')
     parser.add_argument("--use_allnli_data", action='store_true')
+    parser.add_argument("--enable_unsupervised_simcse", action='store_true')
     parser.add_argument("--grad_scaling_factor_for_para", type=float, default=1.0)
     parser.add_argument("--linear_lr_decay_with_swa", action='store_true')
     args = parser.parse_args()
