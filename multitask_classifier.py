@@ -325,7 +325,7 @@ def single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device
     train_loss = train_loss / (num_batches)
     return train_loss
 
-def single_batch_train_para(batch, model, optimizer, device, adv_teacher, debug=False):
+def single_batch_train_para(batch, model, optimizer, device, adv_teacher, grad_scaling_factor_for_para, debug=False):
     b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels, b_sent_ids = (
         batch['token_ids_1'],
         batch['attention_mask_1'],
@@ -354,18 +354,18 @@ def single_batch_train_para(batch, model, optimizer, device, adv_teacher, debug=
         print("para", logits[:5], b_labels[:5])
         print("para loss", loss, "multi negatives ranking loss", multi_negatives_ranking_loss)
         printed += 1
-    loss = loss + 0.5 * multi_negatives_ranking_loss
+    loss = grad_scaling_factor_for_para * (loss + 0.5 * multi_negatives_ranking_loss)
     loss.backward()
     optimizer.step()
     train_loss = loss.item()
     return train_loss
 
 
-def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device, adv_teacher, debug=False):
+def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device, adv_teacher, grad_scaling_factor_for_para, debug=False):
     train_loss = 0
     num_batches = 0
     for batch in tqdm(para_train_dataloader, desc=f'train-para-{epoch}', disable=TQDM_DISABLE):
-        train_loss += single_batch_train_para(batch, model, optimizer, device, adv_teacher, debug)
+        train_loss += single_batch_train_para(batch, model, optimizer, device, adv_teacher, grad_scaling_factor_for_para, debug)
         num_batches += 1
         if debug and num_batches >= 5:
             break
@@ -457,6 +457,7 @@ def single_epoch_train_all(
         device,
         adv_teachers,
         use_allnli_data,
+        grad_scaling_factor_for_para,
         debug=False,
         exclude_sst = False,
         exclude_para = False,
@@ -473,7 +474,7 @@ def single_epoch_train_all(
             sst_train_loss += single_batch_train_sst(batch, model, optimizer, device, adv_teacher_sentiment, debug)
             num_sst_batches += 1
         elif batch['dataset_name'] == 'paraphrase' and not exclude_para:
-            para_train_loss += single_batch_train_para(batch, model, optimizer, device, adv_teacher_paraphrase, debug)
+            para_train_loss += single_batch_train_para(batch, model, optimizer, device, adv_teacher_paraphrase, grad_scaling_factor_for_para, debug)
             num_para_batches += 1
         elif batch['dataset_name'] == 'similarity' and not exclude_sts:
             sts_train_loss += single_batch_train_sts(batch, model, optimizer, device, adv_teacher_similarity, debug)
@@ -616,7 +617,7 @@ def train_multitask(args):
             if exclude_para:
                 para_train_loss = -1
             else:
-                para_train_loss = single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device, adv_teacher_paraphrase, debug = debug)
+                para_train_loss = single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, device, adv_teacher_paraphrase, args.grad_scaling_factor_for_para, debug = debug)
             if exclude_sst:
                 sst_train_loss = -1
             else:
@@ -630,6 +631,7 @@ def train_multitask(args):
                 device,
                 (adv_teacher_similarity, adv_teacher_paraphrase, adv_teacher_sentiment),
                 args.use_allnli_data,
+                args.grad_scaling_factor_for_para,
                 debug = debug,
                 exclude_sst = exclude_sst,
                 exclude_para = exclude_para,
@@ -814,6 +816,7 @@ def get_args():
     parser.add_argument("--adv_train", action='store_true')
     parser.add_argument("--disable_complex_arch", action='store_true')
     parser.add_argument("--use_allnli_data", action='store_true')
+    parser.add_argument("--grad_scaling_factor_for_para", type=float, default=1.0)
     args = parser.parse_args()
     return args
 
