@@ -38,6 +38,9 @@ from evaluation import model_eval_multitask, model_eval_test_multitask
 
 from perturbation import SmartPerturbation
 
+from torch.optim.lr_scheduler import LinearLR
+from torch.optim import swa_utils
+
 TQDM_DISABLE=False
 
 
@@ -590,6 +593,12 @@ def train_multitask(args):
     lr = args.lr
     print("Learning rate of", lr, "for", args.epochs, "epochs")
     optimizer = AdamW(model.parameters(), weight_decay=args.weight_decay, lr=lr)
+    if args.linear_lr_decay_with_swa:
+        swa_model = swa_utils.AveragedModel(model)
+        swa_start = args.epochs * 0.75
+        scheduler = LinearLR(optimizer, start_factor = 1.0, end_factor = 0.2, total_iters = swa_start)
+        swa_scheduler = swa_utils.SWALR(optimizer, swa_lr = lr, anneal_epochs = int(0.1 * args.epochs))
+
     best_dev_acc = 0
     adv_teacher_similarity = None
     adv_teacher_paraphrase = None
@@ -641,6 +650,20 @@ def train_multitask(args):
                 sst_train_loss, para_train_loss, sts_train_loss, allnli_train_loss = losses
                 print(sst_train_loss, para_train_loss, sts_train_loss, allnli_train_loss)
         print(f"Epoch {epoch}: train loss :: {sst_train_loss :.3f}, {para_train_loss :.3f}, {sts_train_loss :.3f}")
+        if debug:
+            print("Learning rates are:", )
+            for param_group in optimizer.param_groups:
+                print(param_group['lr'])
+        if args.linear_lr_decay_with_swa:
+            if epoch > swa_start:
+                if debug:
+                    print("swa step")
+                swa_model.update_parameters(model)
+                swa_scheduler.step()
+            else:
+                if debug:
+                    print("scheduler step")
+                scheduler.step()
         '''
         print(f"Epoch {epoch}: train data stats")
         sst_train_acc, _, _, para_train_acc, _, _, sts_train_acc, _, _ = model_eval_multitask(
@@ -660,9 +683,9 @@ def train_multitask(args):
             sst_dev_dataloader,
             para_dev_dataloader,
             sts_dev_dataloader,
-            model,
+            model if ((not args.linear_lr_decay_with_swa) or epoch <= swa_start) else swa_model.module,
             device,
-            limit_batches = None,
+            limit_batches = None if not debug else 50,
             exclude_sts = exclude_sts,
             exclude_para = exclude_para,
             exclude_sst = exclude_sst,
@@ -820,6 +843,7 @@ def get_args():
     parser.add_argument("--disable_complex_arch", action='store_true')
     parser.add_argument("--use_allnli_data", action='store_true')
     parser.add_argument("--grad_scaling_factor_for_para", type=float, default=1.0)
+    parser.add_argument("--linear_lr_decay_with_swa", action='store_true')
     args = parser.parse_args()
     return args
 
