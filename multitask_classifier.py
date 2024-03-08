@@ -614,7 +614,7 @@ def train_multitask(args):
     optimizer = AdamW(model.parameters(), weight_decay=args.weight_decay, lr=lr)
     if args.linear_lr_decay_with_swa:
         swa_model = swa_utils.AveragedModel(model)
-        swa_start = args.epochs * 0.75
+        swa_start = args.epochs + 1 # args.epochs * 0.75
         scheduler = LinearLR(optimizer, start_factor = 1.0, end_factor = 0.2, total_iters = swa_start)
         swa_scheduler = swa_utils.SWALR(optimizer, swa_lr = 5 * lr, anneal_epochs = int(0.1 * args.epochs))
 
