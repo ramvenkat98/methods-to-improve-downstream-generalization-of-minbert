@@ -200,7 +200,12 @@ class MultitaskBERT(nn.Module):
             raise NotImplementedError
 
     def predict_paraphrase_given_embeddings(self, embedding_1, embedding_2, bert_embedding_1, bert_embedding_2):
-        combined_intermediate_output = torch.concat((bert_embedding_1, bert_embedding_2, embedding_1 * embedding_2), dim=1)
+        # Ablation of bert embedding residuals
+        # combined_intermediate_output = torch.concat((bert_embedding_1, bert_embedding_2, embedding_1 * embedding_2), dim=1)
+        combined_intermediate_output = torch.concat(
+            (torch.zeros_like(bert_embedding_1), torch.zeros_like(bert_embedding_2), embedding_1 * embedding_2),
+            dim=1,
+        )
         return self.paraphrase_final_linear(
             self.paraphrase_final_dropout(combined_intermediate_output)
         ).view(-1)
