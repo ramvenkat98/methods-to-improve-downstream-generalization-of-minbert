@@ -348,7 +348,7 @@ def save_model(model, optimizer, args, config, filepath):
     torch.save(save_info, filepath)
     print(f"save the model to {filepath}")
 
-def single_batch_train_sst(batch, model, optimizer, device, adv_teacher, debug=False):
+def single_batch_train_sst(batch, model, optimizer, device, adv_teacher, distill_dict, debug=False):
         b_ids, b_mask, b_labels, b_sent_ids = (batch['token_ids'],
                                     batch['attention_mask'], batch['labels'], batch['sent_ids'])
         if debug:
@@ -378,7 +378,7 @@ def single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device
     train_loss = train_loss / num_batches
     return train_loss
 
-def single_batch_train_para(batch, model, optimizer, device, adv_teacher, grad_scaling_factor_for_para, debug=False):
+def single_batch_train_para(batch, model, optimizer, device, adv_teacher, grad_scaling_factor_for_para, distill_dict, debug=False):
     b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels, b_sent_ids = (
         batch['token_ids_1'],
         batch['attention_mask_1'],
@@ -424,7 +424,7 @@ def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, devi
     train_loss = train_loss / num_batches
     return train_loss
 
-def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, enable_unsupervised_simcse, debug=False):
+def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, enable_unsupervised_simcse, distill_dict, debug=False):
     b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels, b_sent_ids = (
         batch['token_ids_1'],
         batch['attention_mask_1'],
@@ -522,6 +522,7 @@ def single_epoch_train_all(
         enable_unsupervised_simcse,
         use_allnli_data,
         grad_scaling_factor_for_para,
+        distill_dicts,
         debug=False,
         exclude_sst = False,
         exclude_para = False,
@@ -535,13 +536,16 @@ def single_epoch_train_all(
         allnli_train_loss, num_allnli_batches = 0, 0
     for batch in tqdm(train_dataloader, desc=f'train-all-{epoch}', disable=TQDM_DISABLE):
         if batch['dataset_name'] == 'sentiment' and not exclude_sst:
-            sst_train_loss += single_batch_train_sst(batch, model, optimizer, device, adv_teacher_sentiment, debug)
+            distill_dict = distill_dicts[0] if distill_dicts is not None else None
+            sst_train_loss += single_batch_train_sst(batch, model, optimizer, device, adv_teacher_sentiment, distill_dict, debug)
             num_sst_batches += 1
         elif batch['dataset_name'] == 'paraphrase' and not exclude_para:
-            para_train_loss += single_batch_train_para(batch, model, optimizer, device, adv_teacher_paraphrase, grad_scaling_factor_for_para, debug)
+            distill_dict = distill_dicts[1] if distill_dicts is not None else None
+            para_train_loss += single_batch_train_para(batch, model, optimizer, device, adv_teacher_paraphrase, grad_scaling_factor_for_para, distill_dict, debug)
             num_para_batches += 1
         elif batch['dataset_name'] == 'similarity' and not exclude_sts:
-            sts_train_loss += single_batch_train_sts(batch, model, optimizer, device, adv_teacher_similarity, enable_unsupervised_simcse, debug)
+            distill_dict = distill_dicts[2] if distill_dicts is not None else None
+            sts_train_loss += single_batch_train_sts(batch, model, optimizer, device, adv_teacher_similarity, enable_unsupervised_simcse, distill_dict, debug)
             num_sts_batches += 1
         elif batch['dataset_name'] == 'allnli' and use_allnli_data:
             allnli_train_loss += single_batch_train_allnli(batch, model, optimizer, device, debug)
@@ -717,6 +721,21 @@ def train_multitask(args):
         adv_teacher_paraphrase = SmartPerturbation()
         adv_teacher_sentiment = SmartPerturbation()
 
+    if args.add_distillation_from_predictions_path:
+        (
+            sst_y_distill_logits, sst_distill_sent_ids,
+            para_distill_y_logits, para_distill_sent_ids,
+            sts_distill_y_logits, sts_distill_sent_ids
+        ) = pickle.load(args.distillation_from_predictions_path)
+        sst_y_distill_dict = {}
+        for (sent_id, distill_logit) in zip(sst_distill_sent_ids, sst_y_distill_logits):
+            sst_y_distill_dict[sent_id] = distill_logit
+        para_y_distill_dict = {}
+        for (sent_id, distill_logit) in zip(para_distill_sent_ids, para_distill_y_logits):
+            para_y_distill_dict[sent_id] = distill_logit
+        sts_y_distill_dict = {}
+        for (sent_id, distill_logit) in zip(sts_distill_sent_ids, sts_distill_y_logits):
+            sts_y_distill_dict[sent_id] = distill_logit
     # Run for the specified number of epochs.
     exclude_sts = False
     exclude_para = False
@@ -726,6 +745,7 @@ def train_multitask(args):
         model.train()
         if not args.use_even_batching:
             assert(not args.use_allnli_data)
+            assert(not args.add_distillation_from_predictions_path)
             if exclude_sts:
                 sts_train_loss = -1
             else:
@@ -739,6 +759,9 @@ def train_multitask(args):
             else:
                 sst_train_loss = single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device, adv_teacher_sentiment, debug = debug)
         else:
+            distill_dicts = None
+            if args.add_distillation_from_predictions_path:
+                distill_dicts = (sst_y_distill_dict, para_y_distill_dict, sts_y_distill_dict)    
             losses = single_epoch_train_all(
                 train_dataloader,
                 epoch,
@@ -749,6 +772,7 @@ def train_multitask(args):
                 args.enable_unsupervised_simcse,
                 args.use_allnli_data,
                 args.grad_scaling_factor_for_para,
+                distill_dicts = distill_dicts,
                 debug = debug,
                 exclude_sst = exclude_sst,
                 exclude_para = exclude_para,

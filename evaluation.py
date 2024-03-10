@@ -88,7 +88,6 @@ def model_eval_for_distillation(
             para_sent_ids.extend(b_sent_ids)
             if limit_batches is not None and step > limit_batches:
                 break
-        para_y_logits = [list(logits) for logits in para_y_logits]
         # Evaluate semantic textual similarity.
         sts_y_logits = []
         sts_sent_ids = []
