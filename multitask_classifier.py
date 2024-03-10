@@ -104,6 +104,7 @@ class MultitaskBERT(nn.Module):
         self.disable_complex_arch = config.disable_complex_arch
         if config.disable_complex_arch:
             print("Disabling complex arch")
+            assert(config.num_per_task_embeddings == 1)
             self.sentiment_linear = nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES)
             self.sentiment_dropout = nn.Dropout(config.hidden_dropout_prob)
             self.paraphrase_linear_for_dot = nn.Linear(config.hidden_size, config.paraphrase_embedding_size)
@@ -119,22 +120,40 @@ class MultitaskBERT(nn.Module):
             # self.shared_linear_final = nn.Linear(config.shared_linear_initial_size, config.shared_linear_final_size)
             # self.shared_linear_final_dropout = nn.Dropout(config.hidden_dropout_prob)
             # dedicated weights for sentiment
-            self.sentiment_linear = nn.Linear(config.hidden_size, config.sentiment_embedding_size)
+            self.sentiment_linear = nn.ModuleList(
+                [
+                    nn.Linear(config.hidden_size, config.sentiment_embedding_size)
+                    for _ in range(config.num_per_task_embeddings)
+                ]
+            )
             self.sentiment_dropout = nn.Dropout(config.hidden_dropout_prob)
             # overarching weights for sentiment
-            self.sentiment_overarch = nn.Linear(config.sentiment_embedding_size + config.shared_linear_final_size, N_SENTIMENT_CLASSES)
+            self.sentiment_overarch = nn.Linear(config.num_per_task_embeddings * config.sentiment_embedding_size + config.shared_linear_final_size, N_SENTIMENT_CLASSES)
             # dedicated weights for paraphrase
-            self.paraphrase_linear_for_dot = nn.Linear(config.hidden_size, config.paraphrase_embedding_size)
-            self.paraphrase_final_linear = nn.Linear(config.hidden_size * 2 + config.paraphrase_embedding_size, config.paraphrase_embedding_size)
+            self.paraphrase_linear_for_dot = nn.ModuleList(
+                [
+                    nn.Linear(config.hidden_size, config.paraphrase_embedding_size)
+                    for _ in range(config.num_per_task_embeddings)
+                ]
+            )
+            self.paraphrase_final_linear = nn.Linear(
+                config.hidden_size * 2 + config.num_per_task_embeddings * config.paraphrase_embedding_size, config.paraphrase_embedding_size
+            )
             self.paraphrase_dropout = nn.Dropout(config.hidden_dropout_prob)
             self.paraphrase_final_dropout = nn.Dropout(config.hidden_dropout_prob)
             # overarching weights for paraphrase
             self.paraphrase_overarch = nn.Linear(config.paraphrase_embedding_size + config.shared_linear_final_size, 1)
             # dedicated weights for similarity
-            self.similarity_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
+            self.similarity_linear = nn.ModuleList(
+                [
+                    nn.Linear(config.hidden_size, config.similarity_embedding_size)
+                    for _ in range(config.num_per_task_embeddings)
+                ]
+            )
             self.similarity_dropout = nn.Dropout(config.hidden_dropout_prob)
             # overarching weights for similarity
-            self.similarity_overarch = nn.Linear(config.similarity_embedding_size + config.shared_linear_final_size, config.similarity_embedding_size)
+            # TODO Currently unused!
+            self.similarity_overarch = nn.Linear(config.num_per_task_embeddings * config.similarity_embedding_size + config.shared_linear_final_size, config.similarity_embedding_size)
         if config.use_allnli_data:
             # TODO check on true shared arch implementation
             self.allnli_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
@@ -171,9 +190,9 @@ class MultitaskBERT(nn.Module):
         if self.disable_complex_arch:
             return self.sentiment_linear(bert_embedding)
         shared_arch_output = self.get_shared_arch_output(bert_embedding)
-        dedicated_arch_output = self.sentiment_linear(bert_embedding)
+        dedicated_arch_output = [self.sentiment_linear[i](bert_embedding) for i in range(self.config.num_per_task_embeddings)]
         return self.sentiment_overarch(
-            torch.cat((shared_arch_output, dedicated_arch_output), dim=1)
+            torch.cat(dedicated_arch_output + [shared_arch_output], dim=1)
         )
 
     def predict_sentiment_given_bert_input_embeds(self, input_embed, attention_mask):
@@ -190,7 +209,7 @@ class MultitaskBERT(nn.Module):
         bert_embedding = self.forward(input_ids, attention_mask, sent_ids, 'sentiment')
         return self.predict_sentiment_given_bert_embedding(bert_embedding)
 
-    # TODO address these functions when we re-enable complex arch
+    # TODO address these functions if we re-enable complex arch for Paraphrase Multi Negative Ranking Loss
     def get_paraphrase_embedding_and_bert_embedding(self, input_id, attention_mask, sent_ids, identifier):
         if self.disable_complex_arch:
             bert_embedding = self.paraphrase_linear_for_dot_dropout(self.forward(input_id, attention_mask, sent_ids, identifier))
@@ -200,12 +219,9 @@ class MultitaskBERT(nn.Module):
             raise NotImplementedError
 
     def predict_paraphrase_given_embeddings(self, embedding_1, embedding_2, bert_embedding_1, bert_embedding_2):
-        # Ablation of bert embedding residuals
-        # combined_intermediate_output = torch.concat((bert_embedding_1, bert_embedding_2, embedding_1 * embedding_2), dim=1)
-        combined_intermediate_output = torch.concat(
-            (torch.zeros_like(bert_embedding_1), torch.zeros_like(bert_embedding_2), embedding_1 * embedding_2),
-            dim=1,
-        )
+        if not self.disable_complex_arch:
+            raise NotImplementedError
+        combined_intermediate_output = torch.concat((bert_embedding_1, bert_embedding_2, embedding_1 * embedding_2), dim=1)
         return self.paraphrase_final_linear(
             self.paraphrase_final_dropout(combined_intermediate_output)
         ).view(-1)
@@ -234,8 +250,18 @@ class MultitaskBERT(nn.Module):
         bert_embedding_2 = self.paraphrase_dropout(self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2'))
         shared_arch_output_1 = self.get_shared_arch_output(bert_embedding_1)
         shared_arch_output_2 = self.get_shared_arch_output(bert_embedding_2)
-        dedicated_arch_output_1 = self.paraphrase_linear_for_dot(bert_embedding_1)
-        dedicated_arch_output_2 = self.paraphrase_linear_for_dot(bert_embedding_2)
+        dedicated_arch_output_1 = torch.cat(
+            [
+                self.paraphrase_linear_for_dot[i](bert_embedding_1) for i in range(self.config.num_per_task_embeddings)
+            ],
+            dim=1,
+        )
+        dedicated_arch_output_2 = torch.cat(
+            [
+                self.paraphrase_linear_for_dot[i](bert_embedding_2) for i in range(self.config.num_per_task_embeddings)
+            ],
+            dim=1,
+        )
         dedicated_arch_intermediate = torch.concat((bert_embedding_1, bert_embedding_2, dedicated_arch_output_1 * dedicated_arch_output_2), dim=1)
         dedicated_arch_output = self.paraphrase_final_linear(self.paraphrase_final_dropout(dedicated_arch_intermediate))
         overarch_input = torch.cat(
@@ -252,8 +278,10 @@ class MultitaskBERT(nn.Module):
         if self.disable_complex_arch:
             return self.similarity_linear(bert_embedding)
         shared_arch_output = self.get_shared_arch_output(bert_embedding)
-        dedicated_arch_output = self.similarity_linear(bert_embedding)
-        return torch.cat((shared_arch_output, dedicated_arch_output), dim=1)
+        dedicated_arch_output = [
+            self.similarity_linear[i](bert_embedding) for i in range(self.config.num_per_task_embeddings)
+        ]
+        return torch.cat(dedicated_arch_output + [shared_arch_output], dim=1)
     
     def get_similarity_embedding(self, input_id, attention_mask, sent_ids, identifier):
         bert_embedding = self.forward(input_id, attention_mask, sent_ids, identifier)
@@ -600,6 +628,7 @@ def train_multitask(args):
               'load_model_state_dict_from_model_path': args.load_model_state_dict_from_model_path if args.option == 'finetune_after_additional_pretraining' else None,
               'disable_complex_arch': args.disable_complex_arch,
               'use_allnli_data': args.use_allnli_data,
+              'num_per_task_embeddings': args.num_per_task_embeddings,
               'option': args.option}
 
     config = SimpleNamespace(**config)
@@ -634,9 +663,9 @@ def train_multitask(args):
 
     # Run for the specified number of epochs.
     exclude_sts = False
-    exclude_para = False
+    exclude_para = True
     exclude_sst = False
-    debug = False
+    debug = True
     for epoch in range(args.epochs):
         model.train()
         if not args.use_even_batching:
@@ -870,6 +899,7 @@ def get_args():
     parser.add_argument("--enable_unsupervised_simcse", action='store_true')
     parser.add_argument("--grad_scaling_factor_for_para", type=float, default=1.0)
     parser.add_argument("--linear_lr_decay_with_swa", action='store_true')
+    parser.add_argument("--num_per_task_embeddings", type=int, default=1)
     args = parser.parse_args()
     return args
 
