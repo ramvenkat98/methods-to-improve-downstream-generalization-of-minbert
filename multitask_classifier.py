@@ -732,11 +732,12 @@ def train_multitask(args):
         adv_teacher_sentiment = SmartPerturbation()
 
     if args.add_distillation_from_predictions_path:
-        (
-            sst_y_distill_logits, sst_distill_sent_ids,
-            para_distill_y_logits, para_distill_sent_ids,
-            sts_distill_y_logits, sts_distill_sent_ids
-        ) = pickle.load(args.distillation_from_predictions_path)
+        with open(args.distillation_from_predictions_path, 'rb') as file:
+            (
+                sst_y_distill_logits, sst_distill_sent_ids,
+                para_distill_y_logits, para_distill_sent_ids,
+                sts_distill_y_logits, sts_distill_sent_ids
+            ) = pickle.load(file)
         sst_y_distill_dict = {}
         for (sent_id, distill_logit) in zip(sst_distill_sent_ids, sst_y_distill_logits):
             sst_y_distill_dict[sent_id] = distill_logit
