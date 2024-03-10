@@ -732,7 +732,7 @@ def train_multitask(args):
         adv_teacher_sentiment = SmartPerturbation()
 
     if args.add_distillation_from_predictions_path:
-        with open(args.distillation_from_predictions_path, 'rb') as file:
+        with open(args.add_distillation_from_predictions_path, 'rb') as file:
             (
                 sst_y_distill_logits, sst_distill_sent_ids,
                 para_distill_y_logits, para_distill_sent_ids,
