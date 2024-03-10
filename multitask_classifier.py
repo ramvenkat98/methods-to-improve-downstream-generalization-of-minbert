@@ -23,6 +23,7 @@ from torch.utils.data import DataLoader
 from bert import BertModel
 from optimizer import AdamW
 from tqdm import tqdm
+import pickle
 
 from datasets import (
     SentenceAllDataset,
@@ -34,7 +35,7 @@ from datasets import (
     BatchSamplerAllDataset
 )
 
-from evaluation import model_eval_multitask, model_eval_test_multitask
+from evaluation import model_eval_multitask, model_eval_test_multitask, model_eval_for_distillation
 
 from perturbation import SmartPerturbation
 
@@ -561,6 +562,49 @@ def single_epoch_train_all(
     else:
         return sst_train_loss, para_train_loss, sts_train_loss
 
+def distill_existing_model(args):
+    distillation_debug = False
+    print("No training, only distillation")
+    device = torch.device('cpu')
+    if args.use_gpu and torch.cuda.is_available():
+        device = torch.device('cuda')
+    elif args.use_gpu and torch.backends.mps.is_available():
+        device = torch.device('mps')
+    # Create the data and its corresponding datasets and dataloader.
+    sst_train_data, num_labels,para_train_data, sts_train_data = load_multitask_data(args.sst_train,args.para_train,args.sts_train, split ='train')
+    sst_train_data = SentenceClassificationDataset(sst_train_data, args)
+    sst_train_dataloader = DataLoader(sst_train_data, shuffle=True, batch_size=args.batch_size,
+                                    collate_fn=sst_train_data.collate_fn)
+    para_train_data = SentencePairDataset(para_train_data, args)
+    para_train_dataloader = DataLoader(para_train_data, shuffle=True, batch_size=args.batch_size,
+                                    collate_fn=para_train_data.collate_fn)
+    sts_train_data = SentencePairDataset(sts_train_data, args, isRegression = True)
+
+    sts_train_dataloader = DataLoader(sts_train_data, shuffle=True, batch_size=args.batch_size,
+                                    collate_fn=para_train_data.collate_fn)
+    # Init model.
+    saved = torch.load(args.eval_for_distillation_from_model_path)
+    model = MultitaskBERT(saved['model_config'])
+    model.load_state_dict(saved['model'])
+    model = model.to(device)
+    distillation_eval = model_eval_for_distillation(
+        sst_train_dataloader,
+        para_train_dataloader,
+        sts_train_dataloader,
+        model,
+        device,
+        limit_batches=None,
+    )
+    if distillation_debug:
+        (
+            sst_y_logits, sst_sent_ids, para_y_logits, para_sent_ids, sts_y_logits, sts_sent_ids
+        ) = distillation_eval
+        print(sst_y_logits[:5], sst_sent_ids[:5], para_y_logits[:5], para_sent_ids[:5], sts_y_logits[:5], sts_sent_ids[:5])
+    else:
+        pickle.dump(distillation_eval, args.eval_for_distillation_to_predictions_path)
+        print("Saved to ", args.eval_for_distillation_to_predictions_path)
+
+
 def train_multitask(args):
     '''Train MultitaskBERT.
 
@@ -912,7 +956,9 @@ def get_args():
     parser.add_argument("--linear_lr_decay_with_swa", action='store_true')
     parser.add_argument("--num_per_task_embeddings", type=int, default=1)
     parser.add_argument("--use_intermediate_activation", action='store_true')
-    parser.add_argument("--add_distillation_tasks", action='store_true')
+    parser.add_argument("--eval_for_distillation_from_model_path", type=str)
+    parser.add_argument("--eval_for_distillation_to_predictions_path", type=str)
+    parser.add_argument("--add_distillation_from_predictions_path", type=str)
     args = parser.parse_args()
     return args
 
@@ -924,5 +970,9 @@ if __name__ == "__main__":
         assert(args.load_model_state_dict_from_model_path is not None)
     args.filepath = f'{args.option}-{args.epochs}-{args.lr}-{args.batch_size}-multitask.pt' # Save path.
     seed_everything(args.seed)  # Fix the seed for reproducibility.
-    train_multitask(args)
-    test_multitask(args)
+    if args.eval_for_distillation_from_model_path is not None:
+        assert(args.eval_for_distillation_to_predictions_path is not None)
+        distill_existing_model(args)
+    else:
+        train_multitask(args)
+        test_multitask(args)
