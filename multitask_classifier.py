@@ -697,6 +697,7 @@ def train_multitask(args):
               'use_allnli_data': args.use_allnli_data,
               'num_per_task_embeddings': args.num_per_task_embeddings,
               'use_intermediate_activation': args.use_intermediate_activation,
+              'add_distillation_from_predictions_path': args.add_distillation_from_predictions_path,
               'option': args.option}
 
     config = SimpleNamespace(**config)
