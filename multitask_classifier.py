@@ -595,6 +595,7 @@ def distill_existing_model(args):
                                     collate_fn=para_train_data.collate_fn)
     # Init model.
     saved = torch.load(args.eval_for_distillation_from_model_path)
+    saved['model_config'].add_distillation_from_predictions_path = args.add_distillation_from_predictions_path
     model = MultitaskBERT(saved['model_config'])
     model.load_state_dict(saved['model'])
     model = model.to(device)
