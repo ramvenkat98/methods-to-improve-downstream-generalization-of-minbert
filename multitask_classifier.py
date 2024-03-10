@@ -663,9 +663,9 @@ def train_multitask(args):
 
     # Run for the specified number of epochs.
     exclude_sts = False
-    exclude_para = True
+    exclude_para = False
     exclude_sst = False
-    debug = True
+    debug = False
     for epoch in range(args.epochs):
         model.train()
         if not args.use_even_batching:
