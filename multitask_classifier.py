@@ -282,7 +282,7 @@ class MultitaskBERT(nn.Module):
             dim=1
         )
         if self.config.use_intermediate_activation:
-            sentiment_overarch_input = F.relu(sentiment_overarch_input)
+            overarch_input = F.relu(overarch_input)
         return self.paraphrase_overarch(overarch_input).view(-1)
 
     def get_similarity_embedding_given_bert_embedding(self, bert_embedding):
