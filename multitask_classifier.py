@@ -190,10 +190,10 @@ class MultitaskBERT(nn.Module):
         if self.disable_complex_arch:
             return self.sentiment_linear(bert_embedding)
         shared_arch_output = self.get_shared_arch_output(bert_embedding)
+        if self.config.use_intermediate_activation:
+            shared_arch_output = F.relu(shared_arch_output)
         dedicated_arch_output = [self.sentiment_linear[i](bert_embedding) for i in range(self.config.num_per_task_embeddings)]
-        return self.sentiment_overarch(
-            torch.cat(dedicated_arch_output + [shared_arch_output], dim=1)
-        )
+        return self.sentiment_overarch(torch.cat(dedicated_arch_output + [shared_arch_output], dim=1))
 
     def predict_sentiment_given_bert_input_embeds(self, input_embed, attention_mask):
         bert_embedding = self.bert.forward_given_input_embeds(input_embed, attention_mask)['pooler_output']
@@ -250,6 +250,9 @@ class MultitaskBERT(nn.Module):
         bert_embedding_2 = self.paraphrase_dropout(self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2'))
         shared_arch_output_1 = self.get_shared_arch_output(bert_embedding_1)
         shared_arch_output_2 = self.get_shared_arch_output(bert_embedding_2)
+        if self.config.use_intermediate_activation:
+            shared_arch_output_1 = F.relu(shared_arch_output_1)
+            shared_arch_output_2 = F.relu(shared_arch_output_2)
         dedicated_arch_output_1 = torch.cat(
             [
                 self.paraphrase_linear_for_dot[i](bert_embedding_1) for i in range(self.config.num_per_task_embeddings)
@@ -278,6 +281,8 @@ class MultitaskBERT(nn.Module):
         if self.disable_complex_arch:
             return self.similarity_linear(bert_embedding)
         shared_arch_output = self.get_shared_arch_output(bert_embedding)
+        if self.config.use_intermediate_activation:
+            shared_arch_output = F.relu(shared_arch_output)
         dedicated_arch_output = [
             self.similarity_linear[i](bert_embedding) for i in range(self.config.num_per_task_embeddings)
         ]
@@ -900,6 +905,7 @@ def get_args():
     parser.add_argument("--grad_scaling_factor_for_para", type=float, default=1.0)
     parser.add_argument("--linear_lr_decay_with_swa", action='store_true')
     parser.add_argument("--num_per_task_embeddings", type=int, default=1)
+    parser.add_argument("--use_intermediate_activation", action='store_true')
     args = parser.parse_args()
     return args
 
