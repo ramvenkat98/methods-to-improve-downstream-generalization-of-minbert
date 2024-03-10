@@ -642,6 +642,7 @@ def train_multitask(args):
               'disable_complex_arch': args.disable_complex_arch,
               'use_allnli_data': args.use_allnli_data,
               'num_per_task_embeddings': args.num_per_task_embeddings,
+              'use_intermediate_activation': args.use_intermediate_activation,
               'option': args.option}
 
     config = SimpleNamespace(**config)
