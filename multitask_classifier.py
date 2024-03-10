@@ -117,8 +117,9 @@ class MultitaskBERT(nn.Module):
             # shared weights
             self.shared_linear_initial = nn.Linear(config.hidden_size, config.shared_linear_initial_size)
             self.shared_linear_initial_dropout = nn.Dropout(config.hidden_dropout_prob)
-            # self.shared_linear_final = nn.Linear(config.shared_linear_initial_size, config.shared_linear_final_size)
-            # self.shared_linear_final_dropout = nn.Dropout(config.hidden_dropout_prob)
+            if self.config.use_intermediate_activation:
+                self.shared_linear_final = nn.Linear(config.shared_linear_initial_size, config.shared_linear_final_size)
+                self.shared_linear_final_dropout = nn.Dropout(config.hidden_dropout_prob)
             # dedicated weights for sentiment
             self.sentiment_linear = nn.ModuleList(
                 [
@@ -183,7 +184,14 @@ class MultitaskBERT(nn.Module):
             raise NotImplementedError
         # return self.shared_linear_final(
         # self.shared_linear_final_dropout(
-        return self.shared_linear_initial(bert_embedding)
+        elif self.config.use_intermediate_activation:
+            return self.shared_linear_final(
+                self.shared_linear_final_dropout(
+                    F.relu(self.shared_linear_initial(bert_embedding))
+                )
+            )
+        else:
+            return self.shared_linear_initial(bert_embedding)
 
     def predict_sentiment_given_bert_embedding(self, bert_embedding):
         bert_embedding = self.sentiment_dropout(bert_embedding)
