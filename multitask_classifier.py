@@ -156,6 +156,10 @@ class MultitaskBERT(nn.Module):
             # overarching weights for similarity
             # TODO Currently unused!
             self.similarity_overarch = nn.Linear(config.num_per_task_embeddings * config.similarity_embedding_size + config.shared_linear_final_size, config.similarity_embedding_size)
+        if config.add_distillation_from_predictions_path is not None:
+            assert(self.config.use_intermediate_activation)
+            assert(not self.config.disable_complex_arch)
+            # No dedicated task heads for distillation for now
         if config.use_allnli_data:
             # TODO check on true shared arch implementation
             self.allnli_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
@@ -394,7 +398,6 @@ def single_batch_train_para(batch, model, optimizer, device, adv_teacher, grad_s
     b_ids_2 = b_ids_2.to(device)
     b_mask_2 = b_mask_2.to(device)
     b_labels = b_labels.to(device)
-
     optimizer.zero_grad()
     logits = model.predict_paraphrase(b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_sent_ids)
     # embeddings_1, bert_embeddings_1 = model.get_paraphrase_embedding_and_bert_embedding(b_ids_1, b_mask_1, b_sent_ids, 'para_1')
@@ -407,6 +410,10 @@ def single_batch_train_para(batch, model, optimizer, device, adv_teacher, grad_s
         print("para", logits[:5], b_labels[:5])
         print("para loss", loss, "multi negatives ranking loss", multi_negatives_ranking_loss)
     loss = grad_scaling_factor_for_para * (loss + 0.5 * multi_negatives_ranking_loss)
+    if distill_dict is not None:
+        distill_target_logits = torch.tensor([distill_dict[sent_id] for sent_id in b_sent_ids]).to(device)
+        distill_loss = F.binary_cross_entropy_with_logits(logits, F.sigmoid(distill_target_logits), reduction='sum') / args.batch_size
+        loss = loss + 0.3 * distill_loss
     loss.backward()
     optimizer.step()
     train_loss = loss.item()
@@ -605,7 +612,8 @@ def distill_existing_model(args):
         ) = distillation_eval
         print(sst_y_logits[:5], sst_sent_ids[:5], para_y_logits[:5], para_sent_ids[:5], sts_y_logits[:5], sts_sent_ids[:5])
     else:
-        pickle.dump(distillation_eval, args.eval_for_distillation_to_predictions_path)
+        with open(args.eval_for_distillation_to_predictions_path, 'wb') as file:
+            pickle.dump(distillation_eval, file)
         print("Saved to ", args.eval_for_distillation_to_predictions_path)
 
 
