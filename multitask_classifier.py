@@ -374,7 +374,7 @@ def single_batch_train_sst(batch, model, optimizer, device, adv_teacher, distill
         if distill_dict is not None:
             distill_target_logits = torch.tensor([distill_dict[sent_id] for sent_id in b_sent_ids]).to(device)
             distill_loss = F.cross_entropy(logits, F.softmax(distill_target_logits, dim = 1), reduction='sum') / args.batch_size
-            loss = loss + 0.6 * distill_loss
+            loss = loss + 0.4 * distill_loss
         loss.backward()
         optimizer.step()
         train_loss = loss.item()
@@ -422,7 +422,7 @@ def single_batch_train_para(batch, model, optimizer, device, adv_teacher, grad_s
     if distill_dict is not None:
         distill_target_logits = torch.tensor([distill_dict[sent_id] for sent_id in b_sent_ids]).to(device)
         distill_loss = F.binary_cross_entropy_with_logits(logits, F.sigmoid(distill_target_logits), reduction='sum') / args.batch_size
-        loss = loss + 0.6 * distill_loss
+        loss = loss + 0.4 * distill_loss
     loss.backward()
     optimizer.step()
     train_loss = loss.item()
@@ -489,7 +489,7 @@ def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, enable_
     if distill_dict is not None:
         distill_target_logits = torch.tensor([distill_dict[sent_id] for sent_id in b_sent_ids]).to(device)
         distill_loss = F.mse_loss(predictions, distill_target_logits, reduction='sum') / args.batch_size
-        loss = loss + 0.6 * distill_loss
+        loss = loss + 0.4 * distill_loss
     loss.backward()
     optimizer.step()
     train_loss = loss.item()
