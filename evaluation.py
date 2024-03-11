@@ -105,7 +105,7 @@ def model_eval_for_distillation(
 
             logits = model.predict_similarity(b_ids1, b_mask1, b_ids2, b_mask2).flatten().cpu().numpy()
             b_labels = b_labels.flatten().cpu().numpy()
-            sst_y_logits.extend(logits)
+            sts_y_logits.extend(logits)
             sts_sent_ids.extend(b_sent_ids)
             if limit_batches is not None and step > limit_batches:
                 break
