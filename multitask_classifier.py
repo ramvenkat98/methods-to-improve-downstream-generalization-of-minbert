@@ -701,9 +701,7 @@ def train_multitask(args):
               'shared_linear_final_size': 128,
               'hidden_size': 768,
               'data_dir': '.',
-              'load_model_state_dict_from_model_path': args.load_model_state_dict_from_model_path if args.option in (
-                  'finetune_after_additional_pretraining', 'only_swa'
-               ) else None,
+              'load_model_state_dict_from_model_path': args.load_model_state_dict_from_model_path if args.option == 'finetune_after_additional_pretraining' else None,
               'disable_complex_arch': args.disable_complex_arch,
               'use_allnli_data': args.use_allnli_data,
               'num_per_task_embeddings': args.num_per_task_embeddings,
@@ -714,7 +712,7 @@ def train_multitask(args):
     config = SimpleNamespace(**config)
 
     model = MultitaskBERT(config)
-    if args.option == 'lp_ft' and args.load_model_state_dict_from_model_path is not None:
+    if args.option in ('lp_ft', 'only_swa') and args.load_model_state_dict_from_model_path is not None:
         print(f"Loading model from {args.load_model_state_dict_from_model_path}")
         saved = torch.load(args.load_model_state_dict_from_model_path)
         model.load_state_dict(saved['model'])
