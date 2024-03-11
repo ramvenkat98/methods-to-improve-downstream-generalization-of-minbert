@@ -813,16 +813,9 @@ def train_multitask(args):
             print("Learning rates are:", )
             for param_group in optimizer.param_groups:
                 print(param_group['lr'])
-        if args.linear_lr_decay_with_swa:
-            if epoch > swa_start:
-                if debug:
-                    print("swa step")
-                swa_model.update_parameters(model)
-                swa_scheduler.step()
-            else:
-                if debug:
-                    print("scheduler step")
-                scheduler.step()
+        if args.option == 'only_swa':
+            swa_model.update_parameters(model)
+            swa_scheduler.step()
         '''
         print(f"Epoch {epoch}: train data stats")
         sst_train_acc, _, _, para_train_acc, _, _, sts_train_acc, _, _ = model_eval_multitask(
@@ -838,11 +831,12 @@ def train_multitask(args):
         )
         '''
         print(f"Epoch {epoch}: dev data stats")
+        model_to_use = model if (not args.option == 'only_swa') else swa_model.module
         sst_dev_acc, _, _, para_dev_acc, _, _, sts_dev_acc, _, _ = model_eval_multitask(
             sst_dev_dataloader,
             para_dev_dataloader,
             sts_dev_dataloader,
-            model if (not args.run_only_swa) else swa_model.module,
+            model_to_use,
             device,
             limit_batches = None if not debug else 50,
             exclude_sts = exclude_sts,
@@ -859,7 +853,7 @@ def train_multitask(args):
         if dev_acc > best_dev_acc:
             print(f"Dev acc {dev_acc} is better than best dev acc {best_dev_acc}")
             best_dev_acc = dev_acc
-            save_model(model, optimizer, args, config, args.filepath)
+            save_model(model_to_use, optimizer, args, config, args.filepath)
         else:
             print(f"Dev acc {dev_acc} is not better than best dev acc {best_dev_acc}")
         # print(f"Epoch {epoch}: train loss :: {train_loss :.3f}, train acc :: {train_acc :.3f}, dev acc :: {dev_acc :.3f}")
