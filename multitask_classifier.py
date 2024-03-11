@@ -298,9 +298,9 @@ class MultitaskBERT(nn.Module):
             self.similarity_linear[i](bert_embedding) for i in range(self.config.num_per_task_embeddings)
         ]
         similarity_overarch_input = torch.cat(dedicated_arch_output + [shared_arch_output], dim=1)
-        if self.config.use_intermediate_activation:
-            similarity_overarch_input = F.relu(similarity_overarch_input)
-        return self.similarity_overarch(similarity_overarch_input)
+        # if self.config.use_intermediate_activation:
+        #     similarity_overarch_input = F.relu(similarity_overarch_input)
+        return similarity_overarch_input #self.similarity_overarch(similarity_overarch_input)
     
     def get_similarity_embedding(self, input_id, attention_mask, sent_ids, identifier):
         bert_embedding = self.forward(input_id, attention_mask, sent_ids, identifier)
@@ -331,7 +331,8 @@ class MultitaskBERT(nn.Module):
         bert_embedding = self.allnli_dropout(self.forward(input_id, attention_mask, sent_ids, identifier))
         shared_arch_output = self.get_shared_arch_output(bert_embedding)
         dedicated_arch_output = self.allnli_linear(bert_embedding)
-        return self.allnli_overarch(F.relu(torch.cat([dedicated_arch_output, shared_arch_output], dim=1)))
+        # return self.allnli_overarch(F.relu(
+        return torch.cat([dedicated_arch_output, shared_arch_output], dim=1)
 
     def predict_allnli_given_embedding(self, embedding_1, embedding_2):
         return F.cosine_similarity(embedding_1, embedding_2)
