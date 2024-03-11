@@ -154,7 +154,6 @@ class MultitaskBERT(nn.Module):
             )
             self.similarity_dropout = nn.Dropout(config.hidden_dropout_prob)
             # overarching weights for similarity
-            # TODO Currently unused!
             self.similarity_overarch = nn.Linear(config.num_per_task_embeddings * config.similarity_embedding_size + config.shared_linear_final_size, config.similarity_embedding_size)
         if config.add_distillation_from_predictions_path is not None:
             assert(self.config.use_intermediate_activation)
@@ -164,6 +163,7 @@ class MultitaskBERT(nn.Module):
             # TODO check on true shared arch implementation
             self.allnli_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
             self.allnli_dropout = nn.Dropout(config.hidden_dropout_prob)
+            self.allnli_overarch = nn.Linear(config.similarity_embedding_size + config.shared_linear_final_size, config.similarity_embedding_size)
 
     def forward(self, input_ids, attention_mask, sent_ids, identifier):
         'Takes a batch of sentences and produces embeddings for them.'
@@ -297,7 +297,10 @@ class MultitaskBERT(nn.Module):
         dedicated_arch_output = [
             self.similarity_linear[i](bert_embedding) for i in range(self.config.num_per_task_embeddings)
         ]
-        return torch.cat(dedicated_arch_output + [shared_arch_output], dim=1)
+        similarity_overarch_input = torch.cat(dedicated_arch_output + [shared_arch_output], dim=1)
+        if self.config.use_intermediate_activation:
+            similarity_overarch_input = F.relu(similarity_overarch_input)
+        return self.similarity_overarch(similarity_overarch_input)
     
     def get_similarity_embedding(self, input_id, attention_mask, sent_ids, identifier):
         bert_embedding = self.forward(input_id, attention_mask, sent_ids, identifier)
@@ -325,8 +328,10 @@ class MultitaskBERT(nn.Module):
         return self.predict_similarity_given_embedding(embedding_1, embedding_2)
 
     def get_allnli_embedding(self, input_id, attention_mask, sent_ids, identifier):
-        bert_embedding = self.forward(input_id, attention_mask, sent_ids, identifier)
-        return self.allnli_linear(self.allnli_dropout(bert_embedding))
+        bert_embedding = self.allnli_dropout(self.forward(input_id, attention_mask, sent_ids, identifier))
+        shared_arch_output = self.get_shared_arch_output(bert_embedding)
+        dedicated_arch_output = self.allnli_linear(bert_embedding)
+        return self.allnli_overarch(F.relu(torch.cat([dedicated_arch_output, shared_arch_output], dim=1)))
 
     def predict_allnli_given_embedding(self, embedding_1, embedding_2):
         return F.cosine_similarity(embedding_1, embedding_2)
