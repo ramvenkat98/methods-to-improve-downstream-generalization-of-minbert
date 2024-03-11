@@ -1021,7 +1021,7 @@ def get_args():
 
 if __name__ == "__main__":
     args = get_args()
-    assert(args.load_model_state_dict_from_model_path is None or args.option in ('lp_ft', 'finetune_after_additional_pretraining'))
+    assert(args.load_model_state_dict_from_model_path is None or args.option in ('lp_ft', 'finetune_after_additional_pretraining', 'only_swa'))
     if args.option in ('finetune_after_additional_pretraining', 'only_swa'):
         assert(args.load_model_state_dict_from_model_path is not None)
     args.filepath = f'{args.option}-{args.epochs}-{args.lr}-{args.batch_size}-multitask.pt' # Save path.
