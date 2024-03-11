@@ -701,7 +701,9 @@ def train_multitask(args):
               'shared_linear_final_size': 128,
               'hidden_size': 768,
               'data_dir': '.',
-              'load_model_state_dict_from_model_path': args.load_model_state_dict_from_model_path if args.option == 'finetune_after_additional_pretraining' else None,
+              'load_model_state_dict_from_model_path': args.load_model_state_dict_from_model_path if args.option in (
+                  'finetune_after_additional_pretraining', 'only_swa'
+               ) else None,
               'disable_complex_arch': args.disable_complex_arch,
               'use_allnli_data': args.use_allnli_data,
               'num_per_task_embeddings': args.num_per_task_embeddings,
@@ -725,10 +727,16 @@ def train_multitask(args):
     print("Learning rate of", lr, "for", args.epochs, "epochs")
     optimizer = AdamW(model.parameters(), weight_decay=args.weight_decay, lr=lr)
     if args.linear_lr_decay_with_swa:
+        # SWA disabled except in "only SWA" runs
         swa_model = swa_utils.AveragedModel(model)
         swa_start = args.epochs + 1 # args.epochs * 0.75
         scheduler = LinearLR(optimizer, start_factor = 1.0, end_factor = 0.2, total_iters = swa_start)
         swa_scheduler = swa_utils.SWALR(optimizer, swa_lr = 5 * lr, anneal_epochs = int(0.1 * args.epochs))
+    if args.option == 'only_swa':
+        assert(not args.linear_lr_decay_with_swa)
+        swa_model = swa_utils.AveragedModel(model)
+        swa_start = 0
+        swa_scheduler = swa_utils.SWALR(optimizer, swa_lr = lr, anneal_epochs = args.epochs)    
 
     best_dev_acc = 0
     adv_teacher_similarity = None
@@ -836,7 +844,7 @@ def train_multitask(args):
             sst_dev_dataloader,
             para_dev_dataloader,
             sts_dev_dataloader,
-            model if ((not args.linear_lr_decay_with_swa) or epoch <= swa_start) else swa_model.module,
+            model if (not args.run_only_swa) else swa_model.module,
             device,
             limit_batches = None if not debug else 50,
             exclude_sts = exclude_sts,
@@ -970,7 +978,11 @@ def get_args():
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--option", type=str,
                         help='pretrain: the BERT parameters are frozen; finetune: BERT parameters are updated',
-                        choices=('pretrain', 'finetune', 'lp_ft', 'finetune_after_additional_pretraining'), default="pretrain")
+                        choices=(
+                            'pretrain', 'finetune', 'lp_ft', 'finetune_after_additional_pretraining',
+                            'only_swa'
+                        ), default="pretrain"
+    )
     parser.add_argument("--use_gpu", action='store_true')
 
     parser.add_argument("--sst_dev_out", type=str, default="predictions/sst-dev-output.csv")
@@ -1010,7 +1022,7 @@ def get_args():
 if __name__ == "__main__":
     args = get_args()
     assert(args.load_model_state_dict_from_model_path is None or args.option in ('lp_ft', 'finetune_after_additional_pretraining'))
-    if args.option == 'finetune_after_additional_pretraining':
+    if args.option in ('finetune_after_additional_pretraining', 'only_swa'):
         assert(args.load_model_state_dict_from_model_path is not None)
     args.filepath = f'{args.option}-{args.epochs}-{args.lr}-{args.batch_size}-multitask.pt' # Save path.
     seed_everything(args.seed)  # Fix the seed for reproducibility.
