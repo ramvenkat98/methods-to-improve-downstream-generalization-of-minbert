@@ -22,6 +22,7 @@ from datasets import (
 )
 
 from evaluation import model_eval_for_distillation
+from multitask_classifier import MultitaskBERT
 
 def get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels):
     sst_sent_ids = list(sst_sent_ids_to_predictions.keys())
@@ -76,8 +77,8 @@ sst_sent_ids_to_predictions, para_sent_ids_to_predictions, sts_sent_ids_to_predi
 sst_sent_ids_to_labels, para_sent_ids_to_labels, sts_sent_ids_to_labels = {}, {}, {}
 for path in model_paths:
     # Init model.
-    saved = torch.load(args.eval_for_distillation_from_model_path)
-    saved['model_config'].add_distillation_from_predictions_path = args.add_distillation_from_predictions_path
+    saved = torch.load(path)
+    saved['model_config'].add_distillation_from_predictions_path = False
     model = MultitaskBERT(saved['model_config'])
     model.load_state_dict(saved['model'])
     model = model.to(device)
@@ -99,7 +100,7 @@ for path in model_paths:
     for (i, x) in enumerate(sst_sent_ids):
         if x not in sst_sent_ids_to_predictions:
             sst_sent_ids_to_predictions[x] = []
-        sst_sent_ids_to_predictions[x].append(F.softmax(torch.tensor(sst_y_logits[i])))
+        sst_sent_ids_to_predictions[x].append(F.softmax(torch.tensor(sst_y_logits[i]), 0))
         if x in sst_sent_ids_to_labels:
             assert sst_sent_ids_to_labels[x] == sst_labels[i]
         else:

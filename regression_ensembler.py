@@ -22,6 +22,7 @@ from datasets import (
 )
 
 from evaluation import model_eval_for_distillation
+from multitask_classifier import MultitaskBERT
 import os.path
 
 def get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels):
@@ -57,7 +58,8 @@ sts_dev = "data/sts-train.csv"
 
 device = torch.device('cuda')
 batch_size = 16
-pkl_file_path = hash("ensemble_predictions_" + "_".join(model_paths) + ".pkl")
+pkl_file_path = "ensemble_predictions_" + "_".join(model_paths) + ".pkl"
+print(pkl_file_path)
 
 if os.path.exists(pkl_file_path):
     with open(pkl_file_path, 'rb') as file:
@@ -85,8 +87,8 @@ else:
     sst_sent_ids_to_labels, para_sent_ids_to_labels, sts_sent_ids_to_labels = {}, {}, {}
     for path in model_paths:
         # Init model.
-        saved = torch.load(args.eval_for_distillation_from_model_path)
-        saved['model_config'].add_distillation_from_predictions_path = args.add_distillation_from_predictions_path
+        saved = torch.load(path)
+        saved['model_config'].add_distillation_from_predictions_path = False
         model = MultitaskBERT(saved['model_config'])
         model.load_state_dict(saved['model'])
         model = model.to(device)
