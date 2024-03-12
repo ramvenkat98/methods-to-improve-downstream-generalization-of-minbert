@@ -148,18 +148,18 @@ else:
 
 
 
-# Average the predictions.
-for k in sst_sent_ids_to_predictions:
-    sst_sent_ids_to_predictions[k] = [torch.stack(sst_sent_ids_to_predictions[k]).mean(dim=0)]
-for k in para_sent_ids_to_predictions:
-    para_sent_ids_to_predictions[k] = [torch.stack(para_sent_ids_to_predictions[k]).mean(dim=0)]
-for k in sts_sent_ids_to_predictions:
-    sts_sent_ids_to_predictions[k] = [torch.stack(sts_sent_ids_to_predictions[k]).mean(dim=0)]
+# # Average the predictions.
+# for k in sst_sent_ids_to_predictions:
+#     sst_sent_ids_to_predictions[k] = [torch.stack(sst_sent_ids_to_predictions[k]).mean(dim=0)]
+# for k in para_sent_ids_to_predictions:
+#     para_sent_ids_to_predictions[k] = [torch.stack(para_sent_ids_to_predictions[k]).mean(dim=0)]
+# for k in sts_sent_ids_to_predictions:
+#     sts_sent_ids_to_predictions[k] = [torch.stack(sts_sent_ids_to_predictions[k]).mean(dim=0)]
 
 def para_logit_learned_ensembler(para_sent_ids_to_predictions, para_sent_ids_to_labels):
     lr = 0.1
     para_sent_ids = list(para_sent_ids_to_predictions.keys())
-    para_predictions = torch.tensor([para_sent_ids_to_predictions[x][-1].round().cpu().numpy() for x in para_sent_ids]).to(device)
+    para_predictions = torch.tensor([para_sent_ids_to_predictions[x][-1] for x in para_sent_ids]).to(device)
     para_labels = torch.tensor([para_sent_ids_to_labels[x] for x in para_sent_ids]).to(device)
     weights = (torch.ones(len(model_paths), requires_grad=True) / len(model_paths)).to(device)
     for i in range(100):
