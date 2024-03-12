@@ -68,7 +68,7 @@ def model_eval_for_distillation(
             sst_y_logits.extend(logits)
             sst_sent_ids.extend(b_sent_ids)
             if include_labels:
-                sst_labels.extend(b_labels)
+                sst_labels.extend(b_labels.flatten().cpu().numpy())
             if limit_batches is not None and step > limit_batches:
                 break
         sst_y_logits = [list(logits) for logits in sst_y_logits]
@@ -92,7 +92,7 @@ def model_eval_for_distillation(
             para_y_logits.extend(logits)
             para_sent_ids.extend(b_sent_ids)
             if include_labels:
-                para_labels.extend(b_labels)
+                para_labels.extend(b_labels.flatten().cpu().numpy())
             if limit_batches is not None and step > limit_batches:
                 break
         # Evaluate semantic textual similarity.

@@ -27,19 +27,19 @@ import os.path
 
 def get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels):
     sst_sent_ids = list(sst_sent_ids_to_predictions.keys())
-    sst_predictions = [torch.argmax(sst_sent_ids_to_predictions[x][-1]).cpu().numpy() for x in sst_sent_ids]
+    sst_predictions = [torch.argmax(torch.tensor(sst_sent_ids_to_predictions[x][-1])).cpu().numpy() for x in sst_sent_ids]
     sst_labels = [sst_sent_ids_to_labels[x] for x in sst_sent_ids]
     print("Sentiment accuracy is", np.mean(np.array(sst_predictions) == np.array(sst_labels)))
 
 def get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels):
     para_sent_ids = list(para_sent_ids_to_predictions.keys())
-    para_predictions = [para_sent_ids_to_predictions[x][-1].round().cpu().numpy() for x in para_sent_ids]
+    para_predictions = [torch.tensor(para_sent_ids_to_predictions[x][-1]).sigmoid().round().cpu().numpy() for x in para_sent_ids]
     para_labels = [para_sent_ids_to_labels[x] for x in para_sent_ids]
     print("Paraphrase accuracy is", np.mean(np.array(para_predictions) == np.array(para_labels)))
 
 def get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels):
     sts_sent_ids = list(sts_sent_ids_to_predictions.keys())
-    sts_predictions = [sts_sent_ids_to_predictions[x][-1].cpu().numpy() for x in sts_sent_ids]
+    sts_predictions = [torch.tensor(sts_sent_ids_to_predictions[x][-1]).cpu().numpy() for x in sts_sent_ids]
     sts_labels = [sts_sent_ids_to_labels[x] for x in sts_sent_ids]
     pearson_mat = np.corrcoef(sts_predictions, sts_labels)
     sts_corr = pearson_mat[1][0]
@@ -57,7 +57,7 @@ para_dev = "data/quora-train.csv"
 sts_dev = "data/sts-train.csv"
 
 device = torch.device('cuda')
-batch_size = 16
+batch_size = 32
 pkl_file_path = "ensemble_predictions_" + "_".join(model_paths) + ".pkl"
 print(pkl_file_path)
 
@@ -99,7 +99,7 @@ else:
             sts_dev_dataloader,
             model,
             device,
-            limit_batches=None,
+            limit_batches=500,
             include_labels=True,
         )
         (
@@ -107,10 +107,11 @@ else:
             para_y_logits, para_sent_ids, para_labels,
             sts_y_logits, sts_sent_ids, sts_labels,
         ) = distillation_eval
+        print(sst_y_logits[:5], para_y_logits[:5], sts_y_logits[:5])
         for (i, x) in enumerate(sst_sent_ids):
             if x not in sst_sent_ids_to_predictions:
                 sst_sent_ids_to_predictions[x] = []
-            sst_sent_ids_to_predictions[x].append(F.softmax(torch.tensor(sst_y_logits[i])))
+            sst_sent_ids_to_predictions[x].append(list(F.softmax(torch.tensor(sst_y_logits[i]), 0)))
             if x in sst_sent_ids_to_labels:
                 assert sst_sent_ids_to_labels[x] == sst_labels[i]
             else:
@@ -118,7 +119,7 @@ else:
         for (i, x) in enumerate(para_sent_ids):
             if x not in para_sent_ids_to_predictions:
                 para_sent_ids_to_predictions[x] = []
-            para_sent_ids_to_predictions[x].append((torch.tensor(para_y_logits[i])).sigmoid())
+            para_sent_ids_to_predictions[x].append(para_y_logits[i])
             if x in para_sent_ids_to_labels:
                 assert para_sent_ids_to_labels[x] == para_labels[i]
             else:
@@ -126,7 +127,7 @@ else:
         for (i, x) in enumerate(sts_sent_ids):
             if x not in sts_sent_ids_to_predictions:
                 sts_sent_ids_to_predictions[x] = []
-            sts_sent_ids_to_predictions[x].append(torch.tensor(sts_y_logits[i]))
+            sts_sent_ids_to_predictions[x].append(sts_y_logits[i])
             if x in sts_sent_ids_to_labels:
                 assert sts_sent_ids_to_labels[x] == sts_labels[i]
             else:
@@ -172,7 +173,8 @@ def para_logit_learned_ensembler(para_sent_ids_to_predictions, para_sent_ids_to_
         loss.backward()
         weights.data -= weights.grad * lr
     return weights
-        
+    
+print("Opened file")
 weights = para_logit_learned_ensembler(para_sent_ids_to_predictions, para_sent_ids_to_labels)
 print("Weights:", weights)
 
