@@ -496,7 +496,7 @@ def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, enable_
     train_loss = loss.item()
     return train_loss
 
-def single_batch_train_allnli(batch, model, optimizer, device, debug=False):
+def single_batch_train_allnli(batch, model, optimizer, use_sts_weights_for_allnli, device, debug=False):
     b_ids_1, b_mask_1, b_ids_2, b_mask_2, b_labels, b_sent_ids = (
         batch['token_ids_1'],
         batch['attention_mask_1'],
@@ -514,8 +514,12 @@ def single_batch_train_allnli(batch, model, optimizer, device, debug=False):
     b_labels = b_labels.to(device)
 
     optimizer.zero_grad()
-    embeddings_1 = model.get_allnli_embedding(b_ids_1, b_mask_1, b_sent_ids, 'allnli_1')
-    embeddings_2 = model.get_allnli_embedding(b_ids_2, b_mask_2, b_sent_ids, 'allnli_2')
+    if use_sts_weights_for_allnli:
+        embeddings_1 = model.get_allnli_embedding(b_ids_1, b_mask_1, b_sent_ids, 'allnli_1')
+        embeddings_2 = model.get_allnli_embedding(b_ids_2, b_mask_2, b_sent_ids, 'allnli_2')
+    else:
+        embeddings_1 = model.get_similarity_embedding(b_ids_1, b_mask_1, b_sent_ids, 'allnli_1')
+        embeddings_2 = model.get_similarity_embedding(b_ids_2, b_mask_2, b_sent_ids, 'allnli_2')
     loss = get_multi_negatives_ranking_loss(embeddings_1, embeddings_2, reduction = 'mean')
     loss.backward()
     optimizer.step()
@@ -544,6 +548,7 @@ def single_epoch_train_all(
         use_allnli_data,
         grad_scaling_factor_for_para,
         distill_dicts,
+        use_sts_weights_for_allnli,
         debug=False,
         exclude_sst = False,
         exclude_para = False,
@@ -569,7 +574,7 @@ def single_epoch_train_all(
             sts_train_loss += single_batch_train_sts(batch, model, optimizer, device, adv_teacher_similarity, enable_unsupervised_simcse, distill_dict, debug)
             num_sts_batches += 1
         elif batch['dataset_name'] == 'allnli' and use_allnli_data:
-            allnli_train_loss += single_batch_train_allnli(batch, model, optimizer, device, debug)
+            allnli_train_loss += single_batch_train_allnli(batch, model, optimizer, use_sts_weights_for_allnli, device, debug)
             num_allnli_batches += 1
         if debug and num_sst_batches + num_para_batches + num_sts_batches >= 5:
             break
@@ -803,6 +808,7 @@ def train_multitask(args):
                 args.enable_unsupervised_simcse,
                 args.use_allnli_data,
                 args.grad_scaling_factor_for_para,
+                use_sts_weights_for_allnli=args.use_sts_weights_for_allnli,
                 distill_dicts = distill_dicts,
                 debug = debug,
                 exclude_sst = exclude_sst,
@@ -1013,6 +1019,7 @@ def get_args():
     parser.add_argument("--eval_for_distillation_from_model_path", type=str)
     parser.add_argument("--eval_for_distillation_to_predictions_path", type=str)
     parser.add_argument("--add_distillation_from_predictions_path", type=str)
+    parser.add_argument("--use_sts_weights_for_allnli", action='store_true')
     args = parser.parse_args()
     return args
 
