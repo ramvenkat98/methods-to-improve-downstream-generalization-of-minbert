@@ -52,9 +52,10 @@ model_paths = [
     'para_distillation_mar_10.pt'
 ]
 
-sst_dev = "data/ids-sst-train.csv"
-para_dev = "data/quora-train.csv"
-sts_dev = "data/sts-train.csv"
+with open('split_data_for_ensembling/dev_train_data.pkl', 'rb') as file:
+    sst_dev_train_data, para_dev_train_data, sts_dev_train_data = pickle.load(file)
+with open('split_data_for_ensembling/dev_dev_data.pkl', 'rb') as file:
+    sst_dev_dev_data, para_dev_dev_data, sts_dev_dev_data = pickle.load(file)
 
 device = torch.device('cuda')
 batch_size = 32
@@ -69,19 +70,16 @@ if os.path.exists(pkl_file_path):
         ) = pickle.load(file)
 else:
     # Create the data and its corresponding datasets and dataloader.
-    sst_dev_data, _, para_dev_data, sts_dev_data = load_multitask_data(
-        sst_dev, para_dev, sts_dev, split ='train'
-    )
-    sst_dev_data = SentenceClassificationDataset(sst_dev_data, None)
-    sst_dev_dataloader = DataLoader(sst_dev_data, shuffle=True, batch_size=16,
-                                    collate_fn=sst_dev_data.collate_fn)
-    para_dev_data = SentencePairDataset(para_dev_data, None)
-    para_dev_dataloader = DataLoader(para_dev_data, shuffle=True, batch_size=16,
-                                    collate_fn=para_dev_data.collate_fn)
-    sts_dev_data = SentencePairDataset(sts_dev_data, None, isRegression = True)
+    sst_dev_train_data = SentenceClassificationDataset(sst_dev_train_data, None)
+    sst_dev_train_dataloader = DataLoader(sst_dev_train_data, shuffle=True, batch_size=16,
+                                    collate_fn=sst_dev_train_data.collate_fn)
+    para_dev_train_data = SentencePairDataset(para_dev_train_data, None)
+    para_dev_train_dataloader = DataLoader(para_dev_train_data, shuffle=True, batch_size=16,
+                                    collate_fn=para_dev_train_data.collate_fn)
+    sts_dev_train_data = SentencePairDataset(sts_dev_train_data, None, isRegression = True)
 
-    sts_dev_dataloader = DataLoader(sts_dev_data, shuffle=True, batch_size=16,
-                                    collate_fn=para_dev_data.collate_fn)
+    sts_dev_train_dataloader = DataLoader(sts_dev_train_data, shuffle=True, batch_size=16,
+                                    collate_fn=para_dev_train_data.collate_fn)
 
     sst_sent_ids_to_predictions, para_sent_ids_to_predictions, sts_sent_ids_to_predictions = {}, {}, {}
     sst_sent_ids_to_labels, para_sent_ids_to_labels, sts_sent_ids_to_labels = {}, {}, {}
@@ -94,9 +92,9 @@ else:
         model = model.to(device)
         print("Loaded from path:", path)
         distillation_eval = model_eval_for_distillation(
-            sst_dev_dataloader,
-            para_dev_dataloader,
-            sts_dev_dataloader,
+            sst_dev_train_dataloader,
+            para_dev_train_dataloader,
+            sts_dev_train_dataloader,
             model,
             device,
             limit_batches=500,
