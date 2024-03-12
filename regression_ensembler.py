@@ -97,7 +97,7 @@ else:
             sts_dev_train_dataloader,
             model,
             device,
-            limit_batches=500,
+            limit_batches=None,
             include_labels=True,
         )
         (
@@ -156,27 +156,23 @@ else:
 #     sts_sent_ids_to_predictions[k] = [torch.stack(sts_sent_ids_to_predictions[k]).mean(dim=0)]
 
 def para_logit_learned_ensembler(para_sent_ids_to_predictions, para_sent_ids_to_labels):
-    lr = 0.1
+    lr = 0.2
     para_sent_ids = list(para_sent_ids_to_predictions.keys())
-    para_predictions = torch.tensor([para_sent_ids_to_predictions[x][-1] for x in para_sent_ids]).to(device)
+    para_predictions = [para_sent_ids_to_predictions[x] for x in para_sent_ids]
+    para_predictions = torch.tensor(para_predictions).to(device)
     para_labels = torch.tensor([para_sent_ids_to_labels[x] for x in para_sent_ids]).to(device)
-    weights = (torch.ones(len(model_paths), requires_grad=True) / len(model_paths)).to(device)
-    for i in range(100):
+    weights = torch.tensor([0.25, 0.25, 0.25, 0.25], device=device, requires_grad = True)
+    for i in range(50):
         weights.grad = None
-        full_weights = torch.cat([weights, 1 - torch.sum(weights)], dim=0)
-        logits = para_predictions @ full_weights
+        logits = para_predictions @ weights
         loss = F.binary_cross_entropy_with_logits(logits, para_labels.view(-1).float(), reduction='mean')
-        print("Loss:", loss.item())
-        print("Paraphrase accuracy is", np.mean(logits.sigmoid.round().cpu().numpy() == para_labels.cpu().numpy()))
         loss.backward()
         weights.data -= weights.grad * lr
+    print("Loss:", loss.item())
+    print("Paraphrase accuracy is", np.mean(logits.detach().sigmoid().round().cpu().numpy() == para_labels.cpu().numpy()))
+    print("Reference logit ensembling accuracy is", np.mean(torch.mean(para_predictions, dim = 1).detach().sigmoid().round().cpu().numpy() == para_labels.cpu().numpy()))
+    print("Reference ensembling accuracy is", np.mean(torch.mean(para_predictions.detach().sigmoid(), dim = 1).round().cpu().numpy() == para_labels.cpu().numpy()))
     return weights
     
-print("Opened file")
 weights = para_logit_learned_ensembler(para_sent_ids_to_predictions, para_sent_ids_to_labels)
-print("Weights:", weights)
-
-# print("Averaged predictions, final eval")
-# get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels)
-# get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels)
-# get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels)
+print("Weights", list(weights))

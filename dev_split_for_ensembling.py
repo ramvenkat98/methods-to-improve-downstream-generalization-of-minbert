@@ -3,9 +3,9 @@ import pickle
 from datasets import load_multitask_data
 random.seed(11)
 
-sst_dev = "data/ids-sst-train.csv"
-para_dev = "data/quora-train.csv"
-sts_dev = "data/sts-train.csv"
+sst_dev = "data/ids-sst-dev.csv"
+para_dev = "data/quora-dev.csv"
+sts_dev = "data/sts-dev.csv"
 
 sst_dev_data, _, para_dev_data, sts_dev_data = load_multitask_data(
     sst_dev, para_dev, sts_dev, split ='train'
