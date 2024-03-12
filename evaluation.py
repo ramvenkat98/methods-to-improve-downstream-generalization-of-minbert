@@ -52,12 +52,14 @@ def model_eval_for_distillation(
     model,
     device,
     limit_batches=None,
+    include_labels = False,
 ):
     model.eval()
     with torch.no_grad():
         # Evaluate sentiment classification.
         sst_y_logits = []
         sst_sent_ids = []
+        sst_labels = []
         for step, batch in enumerate(tqdm(sentiment_dataloader, desc=f'eval', disable=TQDM_DISABLE)):
             b_ids, b_mask, b_labels, b_sent_ids = batch['token_ids'], batch['attention_mask'], batch['labels'], batch['sent_ids']
             b_ids = b_ids.to(device)
@@ -65,12 +67,15 @@ def model_eval_for_distillation(
             logits = model.predict_sentiment(b_ids, b_mask).cpu().numpy()
             sst_y_logits.extend(logits)
             sst_sent_ids.extend(b_sent_ids)
+            if include_labels:
+                sst_labels.extend(b_labels)
             if limit_batches is not None and step > limit_batches:
                 break
         sst_y_logits = [list(logits) for logits in sst_y_logits]
         # Evaluate paraphrase detection.
         para_y_logits = []
         para_sent_ids = []
+        para_labels = []
         for step, batch in enumerate(tqdm(paraphrase_dataloader, desc=f'eval', disable=TQDM_DISABLE)):
             (b_ids1, b_mask1,
              b_ids2, b_mask2,
@@ -86,11 +91,14 @@ def model_eval_for_distillation(
             logits = model.predict_paraphrase(b_ids1, b_mask1, b_ids2, b_mask2).cpu().numpy()
             para_y_logits.extend(logits)
             para_sent_ids.extend(b_sent_ids)
+            if include_labels:
+                para_labels.extend(b_labels)
             if limit_batches is not None and step > limit_batches:
                 break
         # Evaluate semantic textual similarity.
         sts_y_logits = []
         sts_sent_ids = []
+        sts_labels = []
         for step, batch in enumerate(tqdm(sts_dataloader, desc=f'eval', disable=TQDM_DISABLE)):
             (b_ids1, b_mask1,
              b_ids2, b_mask2,
@@ -107,9 +115,14 @@ def model_eval_for_distillation(
             b_labels = b_labels.flatten().cpu().numpy()
             sts_y_logits.extend(logits)
             sts_sent_ids.extend(b_sent_ids)
+            if include_labels:
+                sts_labels.extend(b_labels)
             if limit_batches is not None and step > limit_batches:
                 break
-        return sst_y_logits, sst_sent_ids, para_y_logits, para_sent_ids, sts_y_logits, sts_sent_ids
+        if include_labels:
+            return sst_y_logits, sst_sent_ids, sst_labels, para_y_logits, para_sent_ids, para_labels, sts_y_logits, sts_sent_ids, sts_labels
+        else:
+            return sst_y_logits, sst_sent_ids, para_y_logits, para_sent_ids, sts_y_logits, sts_sent_ids
 
 # Evaluate multitask model on dev sets.
 def model_eval_multitask(sentiment_dataloader,

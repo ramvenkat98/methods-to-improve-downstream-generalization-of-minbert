@@ -33,35 +33,12 @@ class SmartPerturbation:
         self.epsilon = epsilon
         # eta
         self.step_size = step_size
-        # self.multi_gpu_on = multi_gpu_on
-        # self.fp16 = fp16
         self.K = k
         # sigma
         self.noise_var = noise_var
         self.norm_p = norm_p
-        # self.encoder_type = encoder_type
-        # self.loss_map = loss_map
-        # self.norm_level = norm_level > 0
-        # assert len(loss_map) > 0
 
     def _norm_grad(self, grad, eff_grad=None, sentence_level=False):
-        # if self.norm_p == "l2":
-        #     if sentence_level:
-        #         direction = grad / (
-        #             torch.norm(grad, dim=(-2, -1), keepdim=True) + self.epsilon
-        #         )
-        #     else:
-        #         direction = grad / (
-        #             torch.norm(grad, dim=-1, keepdim=True) + self.epsilon
-        #         )
-        # elif self.norm_p == "l1":
-        #     direction = grad.sign()
-        # else:
-        #     if sentence_level:
-        #         direction = grad / (
-        #             grad.abs().max((-2, -1), keepdim=True)[0] + self.epsilon
-        #         )
-        #     else:
         direction = grad / (grad.abs().max(-1, keepdim=True)[0] + self.epsilon)
         eff_direction = eff_grad / (
             grad.abs().max(-1, keepdim=True)[0] + self.epsilon
