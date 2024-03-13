@@ -375,7 +375,7 @@ def single_batch_train_sst(batch, model, optimizer, device, adv_teacher, distill
         if distill_dict is not None:
             distill_target_logits = torch.tensor([distill_dict[sent_id] for sent_id in b_sent_ids]).to(device)
             distill_loss = F.cross_entropy(logits, F.softmax(distill_target_logits, dim = 1), reduction='sum') / args.batch_size
-            loss = loss + 0.4 * distill_loss
+            loss = 0.6 * loss + 0.4 * distill_loss
         loss.backward()
         optimizer.step()
         train_loss = loss.item()
@@ -423,7 +423,7 @@ def single_batch_train_para(batch, model, optimizer, device, adv_teacher, grad_s
     if distill_dict is not None:
         distill_target_logits = torch.tensor([distill_dict[sent_id] for sent_id in b_sent_ids]).to(device)
         distill_loss = F.binary_cross_entropy_with_logits(logits, F.sigmoid(distill_target_logits), reduction='sum') / args.batch_size
-        loss = loss + 0.4 * distill_loss
+        loss = 0.6 * loss + 0.4 * distill_loss
     loss.backward()
     optimizer.step()
     train_loss = loss.item()
@@ -479,6 +479,11 @@ def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, enable_
     C = sum(np.exp(np.arange(1, 5))) # TODO fix bug here
     multi_negatives_ranking_loss = torch.sum((b_labels >= 1) * torch.exp(b_labels) / C * multi_negatives_ranking_loss) / torch.sum((b_labels >= 1))
     loss = F.mse_loss(predictions, b_labels.view(-1).float(), reduction='sum') / args.batch_size
+    if distill_dict is not None:
+        loss = 0.6 * loss
+        distill_target_logits = torch.tensor([distill_dict[sent_id] for sent_id in b_sent_ids]).to(device)
+        distill_loss = F.mse_loss(predictions, distill_target_logits, reduction='sum') / args.batch_size
+        loss = loss + 0.4 * distill_loss
     adv_loss = 0
     if adv_teacher is not None:
         adv_loss = adv_teacher.forward(model, predictions, b_ids_1, b_mask_1, b_ids_2, b_mask_2, 'similarity')
@@ -487,10 +492,6 @@ def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, enable_
     loss = loss + 10 * multi_negatives_ranking_loss + 50 * adv_loss
     if enable_unsupervised_simcse:
         loss = loss + 10 * unsupervised_simcse_loss
-    if distill_dict is not None:
-        distill_target_logits = torch.tensor([distill_dict[sent_id] for sent_id in b_sent_ids]).to(device)
-        distill_loss = F.mse_loss(predictions, distill_target_logits, reduction='sum') / args.batch_size
-        loss = loss + 0.4 * distill_loss
     loss.backward()
     optimizer.step()
     train_loss = loss.item()

@@ -144,7 +144,7 @@ get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels)
 # Process averaged predictions correctly for saving.
 for k in sst_sent_ids_to_predictions:
     probability_ensemble = sst_sent_ids_to_predictions[k][-1]
-    sst_sent_ids_to_predictions[k] = torch.log(probability_ensemble).item()
+    sst_sent_ids_to_predictions[k] = list(torch.log(probability_ensemble).cpu().numpy())
 for k in para_sent_ids_to_predictions:
     probability_ensemble = para_sent_ids_to_predictions[k][-1]
     para_sent_ids_to_predictions[k] = (torch.log(probability_ensemble) - torch.log(1 - probability_ensemble)).item()

@@ -50,6 +50,7 @@ model_paths = [
     'para_0_3_model.pt',
     'para_distillation_mar_10.pt',
     'shared_allnli_weights_mar_12.pt',
+    'distilled_model_mar_13.pt',
 ]
 
 sst_dev = "data/ids-sst-dev.csv"
