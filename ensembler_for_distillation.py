@@ -52,9 +52,10 @@ model_paths = [
     'shared_allnli_weights_mar_12.pt',
 ]
 
-sst_dev = "data/ids-sst-dev.csv"
-para_dev = "data/quora-dev.csv"
-sts_dev = "data/sts-dev.csv"
+sst_dev = "data/ids-sst-train.csv"
+para_dev = "data/quora-train.csv"
+sts_dev = "data/sts-train.csv"
+eval_for_distillation_to_predictions_path = "ensemble_for_distillation.pkl"
 
 device = torch.device('cuda')
 batch_size = 16
@@ -139,3 +140,30 @@ print("Averaged predictions, final eval")
 get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels)
 get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels)
 get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels)
+
+# Process averaged predictions correctly for saving.
+for k in sst_sent_ids_to_predictions:
+    probability_ensemble = sst_sent_ids_to_predictions[k][-1]
+    sst_sent_ids_to_predictions[k] = torch.log(probability_ensemble).item()
+for k in para_sent_ids_to_predictions:
+    probability_ensemble = para_sent_ids_to_predictions[k][-1]
+    para_sent_ids_to_predictions[k] = (torch.log(probability_ensemble) - torch.log(1 - probability_ensemble)).item()
+for k in sts_sent_ids_to_predictions:
+    probability_ensemble = sts_sent_ids_to_predictions[k][-1]
+    sts_sent_ids_to_predictions[k] = probability_ensemble.item()
+
+sst_sent_ids = list(sst_sent_ids_to_predictions.keys())
+sst_y_logits = [sst_sent_ids_to_predictions[x] for x in sst_sent_ids]
+para_sent_ids = list(para_sent_ids_to_predictions.keys())
+para_y_logits = [para_sent_ids_to_predictions[x] for x in para_sent_ids]
+sts_sent_ids = list(sts_sent_ids_to_predictions.keys())
+sts_y_logits = [sts_sent_ids_to_predictions[x] for x in sts_sent_ids]
+
+distillation_eval = (
+    sst_y_logits, sst_sent_ids,
+    para_y_logits, para_sent_ids,
+    sts_y_logits, sts_sent_ids,
+)
+with open(eval_for_distillation_to_predictions_path, 'wb') as file:
+    pickle.dump(distillation_eval, file)
+print("Saved to ", eval_for_distillation_to_predictions_path)
