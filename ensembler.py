@@ -24,25 +24,45 @@ from datasets import (
 from evaluation import model_eval_for_distillation
 from multitask_classifier import MultitaskBERT
 
-def get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels):
+def get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels, save):
     sst_sent_ids = list(sst_sent_ids_to_predictions.keys())
     sst_predictions = [torch.argmax(sst_sent_ids_to_predictions[x][-1]).cpu().numpy() for x in sst_sent_ids]
     sst_labels = [sst_sent_ids_to_labels[x] for x in sst_sent_ids]
-    print("Sentiment accuracy is", np.mean(np.array(sst_predictions) == np.array(sst_labels)))
+    sentiment_accuracy = np.mean(np.array(sst_predictions) == np.array(sst_labels))
+    print("Sentiment accuracy is", sentiment_accuracy)
+    if save and save_sst_dev is not None:
+        with open("save_sst_dev", "w+") as f:
+            print(f"dev sentiment acc :: {sentiment_accuracy :.3f}")
+            f.write(f"id \t Predicted_Sentiment \n")
+            for p, s in zip(sst_sent_ids, sst_predictions):
+                f.write(f"{p} , {s} \n")
 
-def get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels):
+def get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels, save):
     para_sent_ids = list(para_sent_ids_to_predictions.keys())
     para_predictions = [para_sent_ids_to_predictions[x][-1].round().cpu().numpy() for x in para_sent_ids]
     para_labels = [para_sent_ids_to_labels[x] for x in para_sent_ids]
-    print("Paraphrase accuracy is", np.mean(np.array(para_predictions) == np.array(para_labels)))
+    para_accuracy = np.mean(np.array(para_predictions) == np.array(para_labels))
+    print("Paraphrase accuracy is", para_accuracy)
+    if save and save_para_dev is not None:
+        with open("save_para_dev", "w+") as f:
+            print(f"dev paraphrase acc :: {para_accuracy :.3f}")
+            f.write(f"id \t Predicted_Is_Paraphrase \n")
+            for p, s in zip(para_sent_ids, para_predictions):
+                f.write(f"{p} , {s} \n")
 
-def get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels):
+def get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels, save):
     sts_sent_ids = list(sts_sent_ids_to_predictions.keys())
     sts_predictions = [sts_sent_ids_to_predictions[x][-1].cpu().numpy() for x in sts_sent_ids]
     sts_labels = [sts_sent_ids_to_labels[x] for x in sts_sent_ids]
     pearson_mat = np.corrcoef(sts_predictions, sts_labels)
     sts_corr = pearson_mat[1][0]
     print("STS pearson is", sts_corr)
+    if save and save_sts_dev is not None:
+        with open("save_sts_dev", "w+") as f:
+            print(f"dev sts corr :: {sts_corr :.3f}")
+            f.write(f"id \t Predicted_Similiary \n")
+            for p, s in zip(sts_sent_ids, sts_predictions):
+                f.write(f"{p} , {s} \n")
 
 model_paths = [
     'best_as_of_mar_10_morning.pt',
@@ -56,6 +76,9 @@ model_paths = [
 sst_dev = "data/ids-sst-dev.csv"
 para_dev = "data/quora-dev.csv"
 sts_dev = "data/sts-dev.csv"
+save_sst_dev = "predictions/sst-dev-output.csv"
+save_para_dev = "predictions/para-dev-output.csv"
+save_sts_dev = "predictions/sts-dev-output.csv"
 
 device = torch.device('cuda')
 batch_size = 16
@@ -124,9 +147,9 @@ for path in model_paths:
         else:
             sts_sent_ids_to_labels[x] = sts_labels[i]
     print("Got predictions")
-    get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels)
-    get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels)
-    get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels)
+    get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels, save = False)
+    get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels, save = False)
+    get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels, save = False)
 
 # Average the predictions.
 for k in sst_sent_ids_to_predictions:
@@ -137,6 +160,6 @@ for k in sts_sent_ids_to_predictions:
     sts_sent_ids_to_predictions[k] = [torch.stack(sts_sent_ids_to_predictions[k]).mean(dim=0)]
 
 print("Averaged predictions, final eval")
-get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels)
-get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels)
-get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels)
+get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels, save = True)
+get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels, save = True)
+get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels, save = True)

@@ -49,7 +49,9 @@ model_paths = [
     'best_as_of_mar_10_morning.pt',
     'para_0_1_num_embeddings_3_mar_11_evening.pt',
     'para_0_3_model.pt',
-    'para_distillation_mar_10.pt'
+    'para_distillation_mar_10.pt',
+    'shared_allnli_weights_mar_12.pt',
+    'distilled_model_mar_13.pt',
 ]
 
 with open('split_data_for_ensembling/dev_train_data.pkl', 'rb') as file:
