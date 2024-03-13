@@ -31,7 +31,7 @@ def get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels, save):
     sentiment_accuracy = np.mean(np.array(sst_predictions) == np.array(sst_labels))
     print("Sentiment accuracy is", sentiment_accuracy)
     if save and save_sst_dev is not None:
-        with open("save_sst_dev", "w+") as f:
+        with open(save_sst_dev, "w+") as f:
             print(f"dev sentiment acc :: {sentiment_accuracy :.3f}")
             f.write(f"id \t Predicted_Sentiment \n")
             for p, s in zip(sst_sent_ids, sst_predictions):
@@ -44,7 +44,7 @@ def get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels, save):
     para_accuracy = np.mean(np.array(para_predictions) == np.array(para_labels))
     print("Paraphrase accuracy is", para_accuracy)
     if save and save_para_dev is not None:
-        with open("save_para_dev", "w+") as f:
+        with open(save_para_dev, "w+") as f:
             print(f"dev paraphrase acc :: {para_accuracy :.3f}")
             f.write(f"id \t Predicted_Is_Paraphrase \n")
             for p, s in zip(para_sent_ids, para_predictions):
@@ -58,7 +58,7 @@ def get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels, save):
     sts_corr = pearson_mat[1][0]
     print("STS pearson is", sts_corr)
     if save and save_sts_dev is not None:
-        with open("save_sts_dev", "w+") as f:
+        with open(save_sts_dev, "w+") as f:
             print(f"dev sts corr :: {sts_corr :.3f}")
             f.write(f"id \t Predicted_Similiary \n")
             for p, s in zip(sts_sent_ids, sts_predictions):
@@ -72,7 +72,6 @@ model_paths = [
     'shared_allnli_weights_mar_12.pt',
     'distilled_model_mar_13.pt',
 ]
-
 sst_dev = "data/ids-sst-dev.csv"
 para_dev = "data/quora-dev.csv"
 sts_dev = "data/sts-dev.csv"
