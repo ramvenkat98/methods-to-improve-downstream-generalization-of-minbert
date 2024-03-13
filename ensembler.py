@@ -75,17 +75,24 @@ model_paths = [
 sst_dev = "data/ids-sst-dev.csv"
 para_dev = "data/quora-dev.csv"
 sts_dev = "data/sts-dev.csv"
+dev_dev_file_path = "split_data_for_ensembling/dev_dev_data.pkl"
 save_sst_dev = "predictions/sst-dev-output.csv"
 save_para_dev = "predictions/para-dev-output.csv"
 save_sts_dev = "predictions/sts-dev-output.csv"
+evaluate_on_only_dev_dev = False
 
 device = torch.device('cuda')
 batch_size = 16
 
 # Create the data and its corresponding datasets and dataloader.
-sst_dev_data, _, para_dev_data, sts_dev_data = load_multitask_data(
-    sst_dev, para_dev, sts_dev, split ='train'
-)
+if evaluate_on_only_dev_dev:
+    sst_dev_data, _, para_dev_data, sts_dev_data = load_multitask_data(
+        sst_dev, para_dev, sts_dev, split ='train'
+    )
+else;
+    with open(dev_dev_file_path, 'rb') as file:
+        sst_dev_data, para_dev_data, sts_dev_data = pickle.load(file)
+
 sst_dev_data = SentenceClassificationDataset(sst_dev_data, None)
 sst_dev_dataloader = DataLoader(sst_dev_data, shuffle=True, batch_size=16,
                                 collate_fn=sst_dev_data.collate_fn)
