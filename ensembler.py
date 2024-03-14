@@ -79,7 +79,7 @@ dev_dev_file_path = "split_data_for_ensembling/dev_dev_data.pkl"
 save_sst_dev = "predictions/sst-dev-output.csv"
 save_para_dev = "predictions/para-dev-output.csv"
 save_sts_dev = "predictions/sts-dev-output.csv"
-evaluate_on_only_dev_dev = True
+evaluate_on_only_dev_dev = False
 
 device = torch.device('cuda')
 batch_size = 16
@@ -154,8 +154,8 @@ for path in model_paths:
             sts_sent_ids_to_labels[x] = sts_labels[i]
     print("Got predictions")
     get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels, save = False)
-    # get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels, save = False)
-    # get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels, save = False)
+    get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels, save = False)
+    get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels, save = False)
 
 # Average the predictions.
 printed = False
@@ -179,6 +179,6 @@ for k in para_sent_ids_to_predictions:
 for k in sts_sent_ids_to_predictions:
     sts_sent_ids_to_predictions[k] = [torch.stack(sts_sent_ids_to_predictions[k]).mean(dim=0)]
 print("Averaged predictions, final eval")
-get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels, save = False)
-get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels, save = False)
-get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels, save = False)
+get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels, save = True)
+get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels, save = True)
+get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels, save = True)
