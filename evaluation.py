@@ -150,9 +150,9 @@ def model_test_eval_for_distillation(
         for step, batch in enumerate(tqdm(paraphrase_dataloader, desc=f'eval', disable=TQDM_DISABLE)):
             (b_ids1, b_mask1,
              b_ids2, b_mask2,
-             b_labels, b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
+             b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
                           batch['token_ids_2'], batch['attention_mask_2'],
-                          batch['labels'], batch['sent_ids'])
+                          batch['sent_ids'])
 
             b_ids1 = b_ids1.to(device)
             b_mask1 = b_mask1.to(device)
@@ -168,9 +168,9 @@ def model_test_eval_for_distillation(
         for step, batch in enumerate(tqdm(sts_dataloader, desc=f'eval', disable=TQDM_DISABLE)):
             (b_ids1, b_mask1,
              b_ids2, b_mask2,
-             b_labels, b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
+             b_sent_ids) = (batch['token_ids_1'], batch['attention_mask_1'],
                           batch['token_ids_2'], batch['attention_mask_2'],
-                          batch['labels'], batch['sent_ids'])
+                          batch['sent_ids'])
 
             b_ids1 = b_ids1.to(device)
             b_mask1 = b_mask1.to(device)
@@ -178,7 +178,6 @@ def model_test_eval_for_distillation(
             b_mask2 = b_mask2.to(device)
 
             logits = model.predict_similarity(b_ids1, b_mask1, b_ids2, b_mask2).flatten().cpu().numpy()
-            b_labels = b_labels.flatten().cpu().numpy()
             sts_y_logits.extend(logits)
             sts_sent_ids.extend(b_sent_ids)
         return sst_y_logits, sst_sent_ids, para_y_logits, para_sent_ids, sts_y_logits, sts_sent_ids

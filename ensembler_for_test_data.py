@@ -45,9 +45,6 @@ def save_para(para_sent_ids_to_predictions):
 def save_sts(sts_sent_ids_to_predictions):
     sts_sent_ids = list(sts_sent_ids_to_predictions.keys())
     sts_predictions = [sts_sent_ids_to_predictions[x][-1].cpu().numpy() for x in sts_sent_ids]
-    sts_labels = [sts_sent_ids_to_labels[x] for x in sts_sent_ids]
-    pearson_mat = np.corrcoef(sts_predictions, sts_labels)
-    sts_corr = pearson_mat[1][0]
     with open(save_sts_test, "w+") as f:
         f.write(f"id \t Predicted_Similiary \n")
         for p, s in zip(sts_sent_ids, sts_predictions):
@@ -107,8 +104,6 @@ for path in model_paths:
         sts_test_dataloader,
         model,
         device,
-        limit_batches=None,
-        include_labels=True,
     )
     (
         sst_y_logits, sst_sent_ids,
