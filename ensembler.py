@@ -79,17 +79,17 @@ dev_dev_file_path = "split_data_for_ensembling/dev_dev_data.pkl"
 save_sst_dev = "predictions/sst-dev-output.csv"
 save_para_dev = "predictions/para-dev-output.csv"
 save_sts_dev = "predictions/sts-dev-output.csv"
-evaluate_on_only_dev_dev = False
+evaluate_on_only_dev_dev = True
 
 device = torch.device('cuda')
 batch_size = 16
 
 # Create the data and its corresponding datasets and dataloader.
-if evaluate_on_only_dev_dev:
+if not evaluate_on_only_dev_dev:
     sst_dev_data, _, para_dev_data, sts_dev_data = load_multitask_data(
         sst_dev, para_dev, sts_dev, split ='train'
     )
-else;
+else:
     with open(dev_dev_file_path, 'rb') as file:
         sst_dev_data, para_dev_data, sts_dev_data = pickle.load(file)
 
@@ -154,18 +154,31 @@ for path in model_paths:
             sts_sent_ids_to_labels[x] = sts_labels[i]
     print("Got predictions")
     get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels, save = False)
-    get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels, save = False)
-    get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels, save = False)
+    # get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels, save = False)
+    # get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels, save = False)
 
 # Average the predictions.
+printed = False
 for k in sst_sent_ids_to_predictions:
-    sst_sent_ids_to_predictions[k] = [torch.stack(sst_sent_ids_to_predictions[k]).mean(dim=0)]
+    # sst_weights = torch.tensor([0.3538, 0.4908, 0.6168, -0.2704, 0.7000, 0.3866])
+    sst_weights = torch.tensor([1.0 / 6 for i in range(6)])
+    current_predictions = torch.stack(sst_sent_ids_to_predictions[k])
+    if not printed:
+        print(sst_weights.shape, current_predictions.shape)
+        printed = True
+    sst_sent_ids_to_predictions[k] = [(current_predictions * sst_weights.unsqueeze(dim = 1)).mean(dim=0)]
 for k in para_sent_ids_to_predictions:
-    para_sent_ids_to_predictions[k] = [torch.stack(para_sent_ids_to_predictions[k]).mean(dim=0)]
+    # para_weights = torch.tensor([0.0145, 0.1204, 0.0763, -0.0173, 0.2543, 0.0810])
+    para_weights = torch.tensor([1.0 / 6 for i in range(6)])
+    current_predictions = torch.stack(para_sent_ids_to_predictions[k])
+    if not printed:
+        print(para_weights.shape, current_predictions.shape)
+        printed = True
+    current_logits = torch.log(current_predictions) - torch.log(1 - current_predictions)
+    para_sent_ids_to_predictions[k] = [(para_weights * current_logits).sum().sigmoid()]
 for k in sts_sent_ids_to_predictions:
     sts_sent_ids_to_predictions[k] = [torch.stack(sts_sent_ids_to_predictions[k]).mean(dim=0)]
-
 print("Averaged predictions, final eval")
-get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels, save = True)
-get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels, save = True)
-get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels, save = True)
+get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels, save = False)
+get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels, save = False)
+get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels, save = False)

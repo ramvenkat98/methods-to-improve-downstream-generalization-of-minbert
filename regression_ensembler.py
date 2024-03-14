@@ -163,7 +163,7 @@ def para_logit_learned_ensembler(para_sent_ids_to_predictions, para_sent_ids_to_
     para_predictions = [para_sent_ids_to_predictions[x] for x in para_sent_ids]
     para_predictions = torch.tensor(para_predictions).to(device)
     para_labels = torch.tensor([para_sent_ids_to_labels[x] for x in para_sent_ids]).to(device)
-    weights = torch.tensor([0.25, 0.25, 0.25, 0.25], device=device, requires_grad = True)
+    weights = torch.tensor([1.0 / 6 for i in range(6)], device=device, requires_grad = True)
     for i in range(50):
         weights.grad = None
         logits = para_predictions @ weights
@@ -175,6 +175,26 @@ def para_logit_learned_ensembler(para_sent_ids_to_predictions, para_sent_ids_to_
     print("Reference logit ensembling accuracy is", np.mean(torch.mean(para_predictions, dim = 1).detach().sigmoid().round().cpu().numpy() == para_labels.cpu().numpy()))
     print("Reference ensembling accuracy is", np.mean(torch.mean(para_predictions.detach().sigmoid(), dim = 1).round().cpu().numpy() == para_labels.cpu().numpy()))
     return weights
-    
-weights = para_logit_learned_ensembler(para_sent_ids_to_predictions, para_sent_ids_to_labels)
+
+def sst_logit_learned_ensembler(sst_sent_ids_to_predictions, sst_sent_ids_to_labels):
+    lr = 1.5
+    sst_sent_ids = list(sst_sent_ids_to_predictions.keys())
+    sst_predictions = [sst_sent_ids_to_predictions[x] for x in sst_sent_ids]
+    sst_predictions = torch.tensor(sst_predictions).to(device)
+    sst_labels = torch.tensor([sst_sent_ids_to_labels[x] for x in sst_sent_ids]).to(device)
+    weights = torch.tensor([1.0 / 6 for i in range(6)], device=device, requires_grad = True)
+    reference_logits = (sst_predictions.detach() * weights.detach().view(1, weights.shape[0], 1)).sum(dim = 1)
+    for i in range(50):
+        weights.grad = None
+        logits = (sst_predictions * weights.view(1, weights.shape[0], 1)).sum(dim = 1)
+        loss = F.cross_entropy(logits, sst_labels.view(-1), reduction='mean')
+        loss.backward()
+        weights.data -= weights.grad * lr
+    print("Loss:", loss.item())
+    print("SST accuracy is", np.mean(logits.detach().argmax(dim = 1).cpu().numpy() == sst_labels.cpu().numpy()))
+    print("Reference ensembling accuracy is", np.mean(reference_logits.detach().argmax(dim = 1).cpu().numpy() == sst_labels.cpu().numpy()))
+    return weights
+   
+# weights = para_logit_learned_ensembler(para_sent_ids_to_predictions, para_sent_ids_to_labels)
+weights = sst_logit_learned_ensembler(sst_sent_ids_to_predictions, sst_sent_ids_to_labels)
 print("Weights", list(weights))
