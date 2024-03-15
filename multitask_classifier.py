@@ -223,45 +223,40 @@ class MultitaskBERT(nn.Module):
         bert_embedding = self.forward(input_ids, attention_mask, sent_ids, 'sentiment')
         return self.predict_sentiment_given_bert_embedding(bert_embedding)
 
-    # TODO address these functions if we re-enable complex arch for Paraphrase Multi Negative Ranking Loss
-    def get_paraphrase_embedding_and_bert_embedding(self, input_id, attention_mask, sent_ids, identifier):
+    # we can address these functions if we re-enable Paraphrase Multi Negative Ranking Loss with complex arch
+    # def get_paraphrase_embedding_and_bert_embedding(self, input_id, attention_mask, sent_ids, identifier):
+    #     if self.disable_complex_arch:
+    #         bert_embedding = self.paraphrase_linear_for_dot_dropout(self.forward(input_id, attention_mask, sent_ids, identifier))
+    #         embedding = self.paraphrase_linear_for_dot(bert_embedding)
+    #         return embedding, bert_embedding
+    #     else:
+    #         raise NotImplementedError
+    # 
+    # def predict_paraphrase_given_embeddings(self, embedding_1, embedding_2, bert_embedding_1, bert_embedding_2):
+    #     if not self.disable_complex_arch:
+    #         raise NotImplementedError
+    #     combined_intermediate_output = torch.concat((bert_embedding_1, bert_embedding_2, embedding_1 * embedding_2), dim=1)
+    #     return self.paraphrase_final_linear(
+    #         self.paraphrase_final_dropout(combined_intermediate_output)
+    #     ).view(-1)
+    
+    def predict_paraphrase_given_bert_input_embeds(self, input_embed_1, attention_mask_1, input_embed_2, attention_mask_2):
+        bert_embedding_1 = self.bert.forward_given_input_embeds(input_embed_1, attention_mask_1)['pooler_output']
+        bert_embedding_2 = self.bert.forward_given_input_embeds(input_embed_2, attention_mask_2)['pooler_output']
+        return self.predict_paraphrase_given_bert_embeddings(bert_embedding_1, bert_embedding_2)
+    
+    def predict_paraphrase_given_bert_embeddings(self, bert_embedding_1, bert_embedding_2):
         if self.disable_complex_arch:
-            bert_embedding = self.paraphrase_linear_for_dot_dropout(self.forward(input_id, attention_mask, sent_ids, identifier))
-            embedding = self.paraphrase_linear_for_dot(bert_embedding)
-            return embedding, bert_embedding
-        else:
-            raise NotImplementedError
-
-    def predict_paraphrase_given_embeddings(self, embedding_1, embedding_2, bert_embedding_1, bert_embedding_2):
-        if not self.disable_complex_arch:
-            raise NotImplementedError
-        combined_intermediate_output = torch.concat((bert_embedding_1, bert_embedding_2, embedding_1 * embedding_2), dim=1)
-        return self.paraphrase_final_linear(
-            self.paraphrase_final_dropout(combined_intermediate_output)
-        ).view(-1)
-
-    def predict_paraphrase(self,
-                           input_ids_1, attention_mask_1,
-                           input_ids_2, attention_mask_2,
-                           sent_ids=None):
-        '''Given a batch of pairs of sentences, outputs a single logit for predicting whether they are paraphrases.
-        Note that your output should be unnormalized (a logit); it will be passed to the sigmoid function
-        during evaluation.
-        '''
-        ### TODO address this part when we re-try multiple negatives loss
-        # embedding_1, bert_embedding_1 = self.get_paraphrase_embedding_and_bert_embedding(
-        #     input_ids_1, attention_mask_1, sent_ids, 'para_1'
-        # )
-        # embedding_2, bert_embedding_2 = self.get_paraphrase_embedding_and_bert_embedding(
-        #     input_ids_2, attention_mask_2, sent_ids, 'para_2'
-        # )
-        # return self.predict_paraphrase_given_embeddings(embedding_1, embedding_2, bert_embedding_1, bert_embedding_2)
-        if self.disable_complex_arch:
-            intermediate_output_1, bert_embedding_1 = self.get_paraphrase_embedding_and_bert_embedding(input_ids_1, attention_mask_1, sent_ids, 'para_1')
-            intermediate_output_2, bert_embedding_2 = self.get_paraphrase_embedding_and_bert_embedding(input_ids_2, attention_mask_2, sent_ids, 'para_2')
-            return self.predict_paraphrase_given_embeddings(intermediate_output_1, intermediate_output_2, bert_embedding_1, bert_embedding_2)
-        bert_embedding_1 = self.paraphrase_dropout(self.forward(input_ids_1, attention_mask_1, sent_ids, 'para_1'))
-        bert_embedding_2 = self.paraphrase_dropout(self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2'))
+            bert_embedding_1 = self.paraphrase_linear_for_dot_dropout(bert_embedding_1)
+            bert_embedding_2 = self.paraphrase_linear_for_dot_dropout(bert_embedding_2)
+            intermediate_output_1 = self.paraphrase_linear_for_dot(bert_embedding_1)
+            intermediate_output_2 = self.paraphrase_linear_for_dot(bert_embedding_2)
+            combined_intermediate_output = torch.concat((bert_embedding_1, bert_embedding_2, intermediate_output_1 * intermediate_output_2), dim=1)
+            return self.paraphrase_final_linear(
+                self.paraphrase_final_dropout(combined_intermediate_output)
+            ).view(-1)
+        bert_embedding_1 = self.paraphrase_dropout(bert_embedding_1)
+        bert_embedding_2 = self.paraphrase_dropout(bert_embedding_2)
         shared_arch_output_1 = self.get_shared_arch_output(bert_embedding_1)
         shared_arch_output_2 = self.get_shared_arch_output(bert_embedding_2)
         dedicated_arch_output_1 = torch.cat(
@@ -288,6 +283,26 @@ class MultitaskBERT(nn.Module):
         if self.config.use_intermediate_activation:
             overarch_input = F.relu(overarch_input)
         return self.paraphrase_overarch(overarch_input).view(-1)
+
+    def predict_paraphrase(self,
+                           input_ids_1, attention_mask_1,
+                           input_ids_2, attention_mask_2,
+                           sent_ids=None):
+        '''Given a batch of pairs of sentences, outputs a single logit for predicting whether they are paraphrases.
+        Note that your output should be unnormalized (a logit); it will be passed to the sigmoid function
+        during evaluation.
+        '''
+        ### address this part if we re-try multiple negatives loss for paraphrase
+        # embedding_1, bert_embedding_1 = self.get_paraphrase_embedding_and_bert_embedding(
+        #     input_ids_1, attention_mask_1, sent_ids, 'para_1'
+        # )
+        # embedding_2, bert_embedding_2 = self.get_paraphrase_embedding_and_bert_embedding(
+        #     input_ids_2, attention_mask_2, sent_ids, 'para_2'
+        # )
+        # return self.predict_paraphrase_given_embeddings(embedding_1, embedding_2, bert_embedding_1, bert_embedding_2)
+        bert_embedding_1 = self.forward(input_ids_1, attention_mask_1, sent_ids, 'para_1')
+        bert_embedding_2 = self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2')
+        return self.predict_paraphrase_given_bert_embeddings(self, bert_embedding_1, bert_embedding_2)
 
     def get_similarity_embedding_given_bert_embedding(self, bert_embedding):
         bert_embedding = self.similarity_dropout(bert_embedding)
@@ -376,6 +391,10 @@ def single_batch_train_sst(batch, model, optimizer, device, adv_teacher, distill
             distill_target_logits = torch.tensor([distill_dict[sent_id] for sent_id in b_sent_ids]).to(device)
             distill_loss = F.cross_entropy(logits, F.softmax(distill_target_logits, dim = 1), reduction='sum') / args.batch_size
             loss = 0.6 * loss + 0.4 * distill_loss
+        adv_loss = 0
+        if adv_teacher is not None:
+            adv_loss = adv_teacher.forward(model, logits, b_ids, b_mask, None, None, 'sentiment')
+        loss = loss + 1 * adv_loss
         loss.backward()
         optimizer.step()
         train_loss = loss.item()
@@ -424,6 +443,10 @@ def single_batch_train_para(batch, model, optimizer, device, adv_teacher, grad_s
         distill_target_logits = torch.tensor([distill_dict[sent_id] for sent_id in b_sent_ids]).to(device)
         distill_loss = F.binary_cross_entropy_with_logits(logits, F.sigmoid(distill_target_logits), reduction='sum') / args.batch_size
         loss = 0.6 * loss + 0.4 * distill_loss
+    adv_loss = 0
+    if adv_teacher is not None:
+        adv_loss = adv_teacher.forward(model, logits, b_ids_1, b_mask_1, b_ids_2, b_mask_2, 'paraphrase')
+    loss = loss + 1 * adv_loss
     loss.backward()
     optimizer.step()
     train_loss = loss.item()
@@ -489,7 +512,7 @@ def single_batch_train_sts(batch, model, optimizer, device, adv_teacher, enable_
         adv_loss = adv_teacher.forward(model, predictions, b_ids_1, b_mask_1, b_ids_2, b_mask_2, 'similarity')
     if debug:
         print("sts", predictions[:5], b_labels[:5], loss, multi_negatives_ranking_loss)
-    loss = loss + 10 * multi_negatives_ranking_loss + 50 * adv_loss
+    loss = loss + 10 * multi_negatives_ranking_loss + 1 * adv_loss
     if enable_unsupervised_simcse:
         loss = loss + 10 * unsupervised_simcse_loss
     loss.backward()
