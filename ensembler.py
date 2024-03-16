@@ -68,10 +68,10 @@ model_paths = [
     'best_as_of_mar_16_morning_no_dropout_and_yes_allnli.pt',
     'with-no-dropout.pt',
     'best_as_of_mar_10_morning.pt',
-    # 'para_0_1_num_embeddings_3_mar_11_evening.pt',
-    # 'para_0_3_model.pt',
-    # 'para_distillation_mar_10.pt',
-    # 'shared_allnli_weights_mar_12.pt',
+    # 'para_0_1_num_embeddings_3_mar_11_evening.pt', #
+    # 'para_0_3_model.pt', #
+    # 'para_distillation_mar_10.pt', #
+    # 'shared_allnli_weights_mar_12.pt', #
     'distilled_model_mar_13.pt',
 ]
 sst_dev = "data/ids-sst-dev.csv"
@@ -182,5 +182,5 @@ for k in sts_sent_ids_to_predictions:
     sts_sent_ids_to_predictions[k] = [torch.stack(sts_sent_ids_to_predictions[k]).mean(dim=0)]
 print("Averaged predictions, final eval")
 get_sst_acc(sst_sent_ids_to_predictions, sst_sent_ids_to_labels, save = True)
-get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels, save = True)
-get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels, save = True)
+# get_para_acc(para_sent_ids_to_predictions, para_sent_ids_to_labels, save = True)
+# get_sts_pearson(sts_sent_ids_to_predictions, sts_sent_ids_to_labels, save = True)
