@@ -103,24 +103,29 @@ class MultitaskBERT(nn.Module):
         self.bert_embeddings_cache = {}
         self.config = config
         self.disable_complex_arch = config.disable_complex_arch
+        if hasattr(config, 'separate_post_bert_dropout'):
+            dropout_prob = config.separate_post_bert_dropout
+            print("Setting separate post-BERT dropout of", dropout_prob)
+        else:
+            dropout_prob = config.hidden_dropout_prob
         if config.disable_complex_arch:
             print("Disabling complex arch")
             assert(config.num_per_task_embeddings == 1)
             self.sentiment_linear = nn.Linear(config.hidden_size, N_SENTIMENT_CLASSES)
-            self.sentiment_dropout = nn.Dropout(config.hidden_dropout_prob)
+            self.sentiment_dropout = nn.Dropout(dropout_prob)
             self.paraphrase_linear_for_dot = nn.Linear(config.hidden_size, config.paraphrase_embedding_size)
-            self.paraphrase_linear_for_dot_dropout = nn.Dropout(config.hidden_dropout_prob)
+            self.paraphrase_linear_for_dot_dropout = nn.Dropout(dropout_prob)
             self.paraphrase_final_linear = nn.Linear(config.hidden_size * 2 + config.paraphrase_embedding_size, 1)
-            self.paraphrase_final_dropout = nn.Dropout(config.hidden_dropout_prob)
+            self.paraphrase_final_dropout = nn.Dropout(dropout_prob)
             self.similarity_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
-            self.similarity_dropout = nn.Dropout(config.hidden_dropout_prob)
+            self.similarity_dropout = nn.Dropout(dropout_prob)
         else:
             # shared weights
             self.shared_linear_initial = nn.Linear(config.hidden_size, config.shared_linear_initial_size)
-            self.shared_linear_initial_dropout = nn.Dropout(config.hidden_dropout_prob)
+            self.shared_linear_initial_dropout = nn.Dropout(dropout_prob)
             if self.config.use_intermediate_activation:
                 self.shared_linear_final = nn.Linear(config.shared_linear_initial_size, config.shared_linear_final_size)
-                self.shared_linear_final_dropout = nn.Dropout(config.hidden_dropout_prob)
+                self.shared_linear_final_dropout = nn.Dropout(dropout_prob)
             # dedicated weights for sentiment
             self.sentiment_linear = nn.ModuleList(
                 [
@@ -128,7 +133,7 @@ class MultitaskBERT(nn.Module):
                     for _ in range(config.num_per_task_embeddings)
                 ]
             )
-            self.sentiment_dropout = nn.Dropout(config.hidden_dropout_prob)
+            self.sentiment_dropout = nn.Dropout(dropout_prob)
             # overarching weights for sentiment
             self.sentiment_overarch = nn.Linear(config.num_per_task_embeddings * config.sentiment_embedding_size + config.shared_linear_final_size, N_SENTIMENT_CLASSES)
             # dedicated weights for paraphrase
@@ -141,8 +146,8 @@ class MultitaskBERT(nn.Module):
             self.paraphrase_final_linear = nn.Linear(
                 config.hidden_size * 2 + config.num_per_task_embeddings * config.paraphrase_embedding_size, config.paraphrase_embedding_size
             )
-            self.paraphrase_dropout = nn.Dropout(config.hidden_dropout_prob)
-            self.paraphrase_final_dropout = nn.Dropout(config.hidden_dropout_prob)
+            self.paraphrase_dropout = nn.Dropout(dropout_prob)
+            self.paraphrase_final_dropout = nn.Dropout(dropout_prob)
             # overarching weights for paraphrase
             self.paraphrase_overarch = nn.Linear(config.paraphrase_embedding_size + config.shared_linear_final_size, 1)
             # dedicated weights for similarity
@@ -152,7 +157,7 @@ class MultitaskBERT(nn.Module):
                     for _ in range(config.num_per_task_embeddings)
                 ]
             )
-            self.similarity_dropout = nn.Dropout(config.hidden_dropout_prob)
+            self.similarity_dropout = nn.Dropout(dropout_prob)
             # overarching weights for similarity
             self.similarity_overarch = nn.Linear(config.num_per_task_embeddings * config.similarity_embedding_size + config.shared_linear_final_size, config.similarity_embedding_size)
         if config.add_distillation_from_predictions_path is not None:
@@ -162,7 +167,7 @@ class MultitaskBERT(nn.Module):
         if config.use_allnli_data:
             # TODO check on true shared arch implementation
             self.allnli_linear = nn.Linear(config.hidden_size, config.similarity_embedding_size)
-            self.allnli_dropout = nn.Dropout(config.hidden_dropout_prob)
+            self.allnli_dropout = nn.Dropout(dropout_prob)
             self.allnli_overarch = nn.Linear(config.similarity_embedding_size + config.shared_linear_final_size, config.similarity_embedding_size)
 
     def forward(self, input_ids, attention_mask, sent_ids, identifier):
@@ -302,7 +307,7 @@ class MultitaskBERT(nn.Module):
         # return self.predict_paraphrase_given_embeddings(embedding_1, embedding_2, bert_embedding_1, bert_embedding_2)
         bert_embedding_1 = self.forward(input_ids_1, attention_mask_1, sent_ids, 'para_1')
         bert_embedding_2 = self.forward(input_ids_2, attention_mask_2, sent_ids, 'para_2')
-        return self.predict_paraphrase_given_bert_embeddings(self, bert_embedding_1, bert_embedding_2)
+        return self.predict_paraphrase_given_bert_embeddings(bert_embedding_1, bert_embedding_2)
 
     def get_similarity_embedding_given_bert_embedding(self, bert_embedding):
         bert_embedding = self.similarity_dropout(bert_embedding)
@@ -743,7 +748,8 @@ def train_multitask(args):
               'use_intermediate_activation': args.use_intermediate_activation,
               'add_distillation_from_predictions_path': args.add_distillation_from_predictions_path,
               'option': args.option}
-
+    if args.separate_post_bert_dropout >= 0.0:
+        config['separate_post_bert_dropout'] = args.separate_post_bert_dropout
     config = SimpleNamespace(**config)
 
     model = MultitaskBERT(config)
@@ -1044,6 +1050,7 @@ def get_args():
     parser.add_argument("--eval_for_distillation_to_predictions_path", type=str)
     parser.add_argument("--add_distillation_from_predictions_path", type=str)
     parser.add_argument("--use_sts_weights_for_allnli", action='store_true')
+    parser.add_argument("--separate_post_bert_dropout", type=float, default=-1.0)
     args = parser.parse_args()
     return args
 
