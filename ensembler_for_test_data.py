@@ -52,11 +52,13 @@ def save_sts(sts_sent_ids_to_predictions):
     print("Saved sts")
 
 model_paths = [
+    'best_as_of_mar_16_morning_no_dropout_and_yes_allnli.pt',
+    'with-no-dropout.pt',
     'best_as_of_mar_10_morning.pt',
-    'para_0_1_num_embeddings_3_mar_11_evening.pt',
-    'para_0_3_model.pt',
-    'para_distillation_mar_10.pt',
-    'shared_allnli_weights_mar_12.pt',
+    # 'para_0_1_num_embeddings_3_mar_11_evening.pt', #
+    # 'para_0_3_model.pt', #
+    # 'para_distillation_mar_10.pt', #
+    # 'shared_allnli_weights_mar_12.pt', #
     'distilled_model_mar_13.pt',
 ]
 sst_test = "data/ids-sst-test-student.csv"
@@ -129,7 +131,7 @@ printed = False
 for k in sst_sent_ids_to_predictions:
     # Obtained from softmax regression on dev dev data
     # sst_weights = torch.tensor([0.3538, 0.4908, 0.6168, -0.2704, 0.7000, 0.3866])
-    sst_weights = torch.tensor([1.0 / 6 for i in range(6)])
+    sst_weights = torch.tensor([1.0 / 4 for i in range(4)])
     current_predictions = torch.stack(sst_sent_ids_to_predictions[k])
     if not printed:
         print(sst_weights.shape, current_predictions.shape)
@@ -138,7 +140,7 @@ for k in sst_sent_ids_to_predictions:
 for k in para_sent_ids_to_predictions:
     # Obtained from logistic regression on dev dev data
     # para_weights = torch.tensor([0.0145, 0.1204, 0.0763, -0.0173, 0.2543, 0.0810])
-    para_weights = torch.tensor([1.0 / 6 for i in range(6)])
+    para_weights = torch.tensor([1.0 / 4 for i in range(4)])
     current_predictions = torch.stack(para_sent_ids_to_predictions[k])
     if not printed:
         print(para_weights.shape, current_predictions.shape)
@@ -149,5 +151,5 @@ for k in sts_sent_ids_to_predictions:
     sts_sent_ids_to_predictions[k] = [torch.stack(sts_sent_ids_to_predictions[k]).mean(dim=0)]
 print("Averaged predictions, save them")
 save_sst(sst_sent_ids_to_predictions)
-save_para(para_sent_ids_to_predictions)
-save_sts(sts_sent_ids_to_predictions)
+# save_para(para_sent_ids_to_predictions)
+# save_sts(sts_sent_ids_to_predictions)
