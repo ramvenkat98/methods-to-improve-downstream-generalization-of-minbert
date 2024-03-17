@@ -409,7 +409,7 @@ def single_epoch_train_sst(sst_train_dataloader, epoch, model, optimizer, device
     train_loss = 0
     num_batches = 0
     for batch in tqdm(sst_train_dataloader, desc=f'train-sst-{epoch}', disable=TQDM_DISABLE):
-        train_loss += single_batch_train_sst(batch, model, optimizer, device, adv_teacher, debug)
+        train_loss += single_batch_train_sst(batch, model, optimizer, device, adv_teacher, None, debug)
         num_batches += 1
         if debug and num_batches >= 5:
             break
@@ -462,7 +462,7 @@ def single_epoch_train_para(para_train_dataloader, epoch, model, optimizer, devi
     train_loss = 0
     num_batches = 0
     for batch in tqdm(para_train_dataloader, desc=f'train-para-{epoch}', disable=TQDM_DISABLE):
-        train_loss += single_batch_train_para(batch, model, optimizer, device, adv_teacher, grad_scaling_factor_for_para, debug)
+        train_loss += single_batch_train_para(batch, model, optimizer, device, adv_teacher, grad_scaling_factor_for_para, None, debug)
         num_batches += 1
         if debug and num_batches >= 5:
             break
@@ -559,7 +559,7 @@ def single_epoch_train_sts(sts_train_dataloader, epoch, model, optimizer, device
     train_loss = 0
     num_batches = 0
     for batch in tqdm(sts_train_dataloader, desc=f'train-sts-{epoch}', disable=TQDM_DISABLE):
-        train_loss += single_batch_train_sts(batch, model, optimizer, device, adv_teacher, enable_unsupervised_simcse, debug)
+        train_loss += single_batch_train_sts(batch, model, optimizer, device, adv_teacher, enable_unsupervised_simcse, None, debug)
         num_batches += 1
         if debug and num_batches >= 5:
             break
@@ -721,15 +721,15 @@ def train_multitask(args):
                 batches_by_dataset[dataset_name] = batches_by_dataset.get(dataset_name, 0) + 1
             print("Batches by dataset is", batches_by_dataset)
         '''
-        sst_dev_data = SentenceClassificationDataset(sst_dev_data, args)
-        sst_dev_dataloader = DataLoader(sst_dev_data, shuffle=False, batch_size=args.batch_size,
-                                collate_fn=sst_dev_data.collate_fn)
-        para_dev_data = SentencePairDataset(para_dev_data, args)
-        para_dev_dataloader = DataLoader(para_dev_data, shuffle=False, batch_size=args.batch_size,
-                                collate_fn=para_dev_data.collate_fn)
-        sts_dev_data = SentencePairDataset(sts_dev_data, args, isRegression = True)
-        sts_dev_dataloader = DataLoader(sts_dev_data, shuffle=False, batch_size=args.batch_size,
-                                        collate_fn=para_dev_data.collate_fn)
+    sst_dev_data = SentenceClassificationDataset(sst_dev_data, args)
+    sst_dev_dataloader = DataLoader(sst_dev_data, shuffle=False, batch_size=args.batch_size,
+                            collate_fn=sst_dev_data.collate_fn)
+    para_dev_data = SentencePairDataset(para_dev_data, args)
+    para_dev_dataloader = DataLoader(para_dev_data, shuffle=False, batch_size=args.batch_size,
+                            collate_fn=para_dev_data.collate_fn)
+    sts_dev_data = SentencePairDataset(sts_dev_data, args, isRegression = True)
+    sts_dev_dataloader = DataLoader(sts_dev_data, shuffle=False, batch_size=args.batch_size,
+                                    collate_fn=para_dev_data.collate_fn)
     # Init model.
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
               'num_labels': num_labels,
