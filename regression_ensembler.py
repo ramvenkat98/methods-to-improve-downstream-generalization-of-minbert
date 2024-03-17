@@ -81,7 +81,7 @@ else:
     sts_dev_train_data = SentencePairDataset(sts_dev_train_data, None, isRegression = True)
 
     sts_dev_train_dataloader = DataLoader(sts_dev_train_data, shuffle=True, batch_size=16,
-                                    collate_fn=para_dev_train_data.collate_fn)
+                                    collate_fn=sts_dev_train_data.collate_fn)
 
     sst_sent_ids_to_predictions, para_sent_ids_to_predictions, sts_sent_ids_to_predictions = {}, {}, {}
     sst_sent_ids_to_labels, para_sent_ids_to_labels, sts_sent_ids_to_labels = {}, {}, {}

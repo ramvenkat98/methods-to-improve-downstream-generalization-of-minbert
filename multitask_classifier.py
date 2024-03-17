@@ -729,7 +729,7 @@ def train_multitask(args):
                             collate_fn=para_dev_data.collate_fn)
     sts_dev_data = SentencePairDataset(sts_dev_data, args, isRegression = True)
     sts_dev_dataloader = DataLoader(sts_dev_data, shuffle=False, batch_size=args.batch_size,
-                                    collate_fn=para_dev_data.collate_fn)
+                                    collate_fn=sts_dev_data.collate_fn)
     # Init model.
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
               'num_labels': num_labels,
